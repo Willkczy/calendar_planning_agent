@@ -1,0 +1,104 @@
+# =============================================================================
+# infrastructure/cloudformation/template.yaml
+# =============================================================================
+# AWS CloudFormation template for production deployment.
+# Deploys the Calendar Agent as an ECS Fargate service behind an ALB.
+#
+# NOT NEEDED FOR THE FIRST THREE WEEKS — this is a placeholder for when
+# you're ready to move to AWS.
+#
+# STEPS TO COMPLETE (when ready for AWS):
+# 1. Fill in the VPC, subnet, and security-group parameters.
+# 2. Adjust CPU/memory to your needs.
+# 3. Add an ACM certificate ARN for HTTPS on the ALB.
+# 4. Store secrets (API keys) in AWS Secrets Manager and reference them.
+# =============================================================================
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Calendar Planning Agent — ECS Fargate deployment
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+
+  DockerImage:
+    Type: String
+    Description: ECR image URI, e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/calendar-agent:latest
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  SecretsManagerArn:
+    Type: String
+    Description: ARN of the Secrets Manager secret holding API keys
+
+Resources:
+  # --- ECS Cluster ---
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${EnvironmentName}-calendar-agent"
+
+  # --- Task Definition ---
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${EnvironmentName}-calendar-agent"
+      Cpu: "512"
+      Memory: "1024"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: calendar-agent
+          Image: !Ref DockerImage
+          PortMappings:
+            - ContainerPort: 8501
+          Secrets:
+            - Name: ANTHROPIC_API_KEY
+              ValueFrom: !Sub "${SecretsManagerArn}:ANTHROPIC_API_KEY::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  # --- IAM Roles (stubs — fill in policies) ---
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      # TODO: attach AmazonECSTaskExecutionRolePolicy + Secrets Manager read
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  # --- CloudWatch Log Group ---
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${EnvironmentName}-calendar-agent"
+      RetentionInDays: 30
+
+  # --- ALB, Target Group, Service (TODO) ---
+  # Placeholder: define ALB, listener, target group, and ECS Service here.

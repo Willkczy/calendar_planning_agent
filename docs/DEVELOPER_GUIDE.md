@@ -94,6 +94,24 @@ Key values from `.env.example`:
 Use `CALENDAR_MODE=mock` unless explicitly testing live Google Calendar behavior.
 Use `LLM_PROVIDER=mock` unless explicitly testing a live LLM provider.
 
+### `.env` vs `.env.example` divergence
+
+`.env.example` is the **safe shared default**: `CALENDAR_MODE=mock`,
+`LLM_DECOMPOSITION_MODEL=google/gemini-2.5-flash`. Anything you put in
+your local `.env` is allowed to deviate — common reasons:
+
+- `CALENDAR_MODE=live` while debugging Google Calendar writes.
+- `LLM_DECOMPOSITION_MODEL=google/gemini-3.1-pro-preview` to try a
+  newer Vertex AI preview model on a single machine.
+- `GOOGLE_CALENDAR_ID` set to a personal calendar id rather than
+  `primary`.
+
+These local overrides are **never** committed (`.env` is gitignored).
+If you change a value that should affect everyone, update
+`.env.example` in the same commit. Run a fast smoke
+(`CALENDAR_MODE=mock LLM_PROVIDER=mock streamlit run src/app.py`)
+after editing `.env` to confirm the app still boots.
+
 Gemini example:
 
 ```dotenv

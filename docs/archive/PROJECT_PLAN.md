@@ -8,9 +8,17 @@
 
 ---
 
-## Current State
+## Current State (as of 2026-04-17, archived)
 
-As of the current integration branch:
+> **This section is a historical snapshot.** Numbers, file paths, and
+> open issues below were accurate at the original plan date.
+> For the live state, read `docs/STATUS.md` instead — the test suite
+> has since grown to 317 tests across three tiers, the
+> `tests/test_*.py` layout has been reorganised under
+> `tests/programmatic/`, and the `requirements.txt` /
+> `pyproject.toml` mismatch has been reconciled.
+
+As of 2026-04-17, on the current integration branch:
 - Core source modules are implemented: settings, state types, LLM client, Google Calendar auth/events wrappers, free-slot computation, mock calendar, validator, three scheduling heuristics, graph nodes, graph wiring helpers, frontend components, approval controls, and `src/app.py`.
 - The local suite reports `46 passed` with `.venv/bin/pytest -q`.
 - Some tests still contain no-op `pass # TODO` bodies, especially `tests/test_validator.py`, `tests/test_calendar_api.py`, and `tests/test_orchestration.py::TestValidateCandidates`; the green suite should not be treated as complete coverage yet.

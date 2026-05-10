@@ -100,9 +100,48 @@ The agent produces three candidate schedules. Approve one to
 "write" the events (mock mode prints the writes; live mode hits
 Google Calendar).
 
-> **Screenshots:** intake → review → done flows live in
-> `docs/screenshots/` (placeholder until the next walkthrough is
-> recorded).
+### Screenshots
+
+A complete walkthrough captured against the mock calendar with
+real Vertex AI for decomposition / rationale generation. Full set
+in [docs/screenshots/](docs/screenshots/).
+
+#### 1. Intake form
+Goal, deadline, working hours, max session length, configurable
+inter-task break, and per-period energy levels.
+
+![Intake form](docs/screenshots/01-intake-form.png)
+
+#### 2. Three candidate schedules side by side
+
+The agent generates three candidates in parallel and lets the user
+pick. Existing busy blocks render gray; agent proposals render in
+the strategy's color.
+
+| Strategy | Goal | Color |
+|----------|------|-------|
+| Finish Earliest | Maximise buffer before deadline | blue |
+| Keep Time Contiguous | Fill largest slots first to minimise context-switching | green |
+| Energy-Aware | Heavy work in high-energy periods | orange |
+
+![Finish Earliest](docs/screenshots/02-strategy-finish-earliest.png)
+![Keep Time Contiguous](docs/screenshots/03-strategy-keep-time-contiguous.png)
+![Energy-Aware](docs/screenshots/04-strategy-energy-aware.png)
+
+Each strategy shows: rationale, agent reviews (multi-agent critic
+output), task breakdown table, and a FullCalendar week view.
+
+#### 3. Approval confirmation
+After the user approves a strategy, the app writes the calendar
+events and shows the debug trace.
+
+![Approval confirmation](docs/screenshots/05-approval-confirmation.png)
+
+#### 4. Live Google Calendar after write
+End-to-end verification: agent-tagged events appear in the user's
+real Google Calendar alongside the existing busy blocks.
+
+![Google Calendar after write](docs/screenshots/06-google-calendar-live.png)
 
 ## Tests
 

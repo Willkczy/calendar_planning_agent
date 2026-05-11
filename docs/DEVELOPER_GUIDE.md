@@ -205,7 +205,6 @@ Also check:
 
 ## Reference Docs
 
-- `AGENTS.md` / `CLAUDE.md` -- concise AI entrypoints.
 - `docs/STATUS.md` -- current project status.
 - `docs/ARCHITECTURE.md` -- system contracts and graph design.
 - `PROGRAMMER_MANUAL.md` -- long-form detailed reference.

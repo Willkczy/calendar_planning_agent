@@ -187,12 +187,6 @@ heuristic comparison, evaluation, and lessons learned — is in
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common failures and fixes.
 - [PROGRAMMER_MANUAL.md](PROGRAMMER_MANUAL.md) — long-form reference.
 
-## Production Deployment
-
-`Dockerfile` + `docker-compose.yml` for local containers.
-`infrastructure/` contains CloudFormation templates for AWS ECS /
-Fargate behind an ALB, with secrets read from AWS Secrets Manager.
-
 ## Hard Rules
 
 - Calendar writes are **add-only** — `events().update()` and

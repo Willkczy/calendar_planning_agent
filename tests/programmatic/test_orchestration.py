@@ -1150,8 +1150,9 @@ class TestBuildProposal:
 
 class TestLiveCalendarNodeIntegration:
     def test_fetch_events_uses_configured_app_timezone(self, monkeypatch):
+        future_deadline = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
         state = {
-            "deadline": "2026-05-15",
+            "deadline": future_deadline,
             "work_start": "09:00",
             "work_end": "18:00",
         }

@@ -5,16 +5,15 @@
 # events scheduled by the agent.  Operates in STRICT ADD-ONLY mode — no
 # update or delete calls are ever made.
 #
-# STEPS TO COMPLETE:
-# 1. Implement fetch_busy_blocks() to pull events from the calendar.
-# 2. Implement create_event() to write a single event.
-# 3. Implement create_events_batch() to write a list of events.
+# Application writes are coordinated by src/planning/service.py so approvals
+# and per-event recovery are persisted before these low-level calls.
 # =============================================================================
 
 from __future__ import annotations
 
 import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from src.calendar_api.auth import build_calendar_service
 
@@ -26,6 +25,7 @@ def _parse_event_boundary(
     event_boundary: dict[str, str],
     *,
     is_end_boundary: bool,
+    timezone: datetime.tzinfo = datetime.timezone.utc,
 ) -> datetime.datetime | None:
     """Convert Google Calendar boundary payload to a timezone-aware datetime.
 
@@ -37,7 +37,7 @@ def _parse_event_boundary(
     if raw_datetime:
         parsed = datetime.datetime.fromisoformat(raw_datetime)
         if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=datetime.timezone.utc)
+            return parsed.replace(tzinfo=timezone)
         return parsed
 
     raw_date = event_boundary.get("date")
@@ -45,18 +45,19 @@ def _parse_event_boundary(
         return None
 
     day = datetime.date.fromisoformat(raw_date)
-    if is_end_boundary:
-        parsed = datetime.datetime.combine(day, datetime.time.min)
-    else:
-        parsed = datetime.datetime.combine(day, datetime.time.min)
-
-    return parsed.replace(tzinfo=datetime.timezone.utc)
+    # Google all-day end dates are already exclusive, so both boundaries use
+    # midnight on the supplied date in the calendar's timezone.
+    parsed = datetime.datetime.combine(day, datetime.time.min)
+    return parsed.replace(tzinfo=timezone)
 
 
 def fetch_busy_blocks(
     time_min: datetime.datetime,
     time_max: datetime.datetime,
     calendar_id: str = "primary",
+    *,
+    timezone: str | None = None,
+    exclude_ids: set[str] | None = None,
 ) -> list[dict[str, str]]:
     """Fetch all events between time_min and time_max and return busy blocks.
 
@@ -68,20 +69,9 @@ def fetch_busy_blocks(
     Returns:
         List of dicts: [{"start": <ISO str>, "end": <ISO str>}, ...]
 
-    STEPS:
-    1. Call build_calendar_service() to get the service object.
-    2. Use service.events().list(
-           calendarId=calendar_id,
-           timeMin=time_min.isoformat(),
-           timeMax=time_max.isoformat(),
-           singleEvents=True,
-           orderBy="startTime",
-       ).execute()
-    3. Iterate over the returned "items".
-       a. For each event, extract start["dateTime"] and end["dateTime"].
-       b. Skip all-day events (they have "date" instead of "dateTime").
-       c. Append {"start": <start_iso>, "end": <end_iso>} to the result list.
-    4. Return the list sorted by start time.
+    Paginate recurring instances and include all-day events in the calendar's
+    timezone. Transparent, cancelled, and self-declined entries do not block
+    time. Read failures and invalid intervals propagate to the caller.
     """
     service = build_calendar_service()
     busy_blocks: list[dict[str, str]] = []
@@ -102,13 +92,28 @@ def fetch_busy_blocks(
         )
 
         for item in response.get("items", []):
+            if (
+                item.get("id") in (exclude_ids or set())
+                or item.get("status") == "cancelled"
+                or item.get("transparency") == "transparent"
+                or any(
+                    a.get("self") and a.get("responseStatus") == "declined"
+                    for a in item.get("attendees", [])
+                )
+            ):
+                continue
             start_data = item.get("start", {})
             end_data = item.get("end", {})
-
-            start_dt = _parse_event_boundary(start_data, is_end_boundary=False)
-            end_dt = _parse_event_boundary(end_data, is_end_boundary=True)
+            calendar_timezone = response.get("timeZone") or timezone
+            zone = ZoneInfo(calendar_timezone) if calendar_timezone else time_min.tzinfo
+            start_dt = _parse_event_boundary(
+                start_data, is_end_boundary=False, timezone=zone
+            )
+            end_dt = _parse_event_boundary(
+                end_data, is_end_boundary=True, timezone=zone
+            )
             if not start_dt or not end_dt or start_dt >= end_dt:
-                continue
+                raise ValueError("Calendar returned an invalid event interval")
 
             busy_blocks.append(
                 {"start": start_dt.isoformat(), "end": end_dt.isoformat()}
@@ -118,7 +123,7 @@ def fetch_busy_blocks(
         if not page_token:
             break
 
-    busy_blocks.sort(key=lambda b: b["start"])
+    busy_blocks.sort(key=lambda b: datetime.datetime.fromisoformat(b["start"]))
     return busy_blocks
 
 
@@ -129,6 +134,7 @@ def create_event(
     end: datetime.datetime,
     calendar_id: str = "primary",
     color_id: str | None = None,
+    event_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a single event on the user's Google Calendar.
 
@@ -170,8 +176,20 @@ def create_event(
     }
     if color_id:
         event_body["colorId"] = str(color_id)
+    if event_id:
+        event_body["id"] = event_id
 
     return service.events().insert(calendarId=calendar_id, body=event_body).execute()
+
+
+def get_event(event_id: str, calendar_id: str = "primary") -> dict:
+    """Read an existing event to reconcile an interrupted add-only write."""
+    return (
+        build_calendar_service()
+        .events()
+        .get(calendarId=calendar_id, eventId=event_id)
+        .execute()
+    )
 
 
 def create_events_batch(

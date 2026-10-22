@@ -1,217 +1,258 @@
-# =============================================================================
-# src/app.py — Streamlit application entry point
-# =============================================================================
-# Run with:  streamlit run src/app.py
-#
-# This file wires together the frontend components and the orchestration
-# backend. It manages Streamlit session state to hold the LangGraph execution
-# state across user interactions (form submit → agent runs → user picks
-# strategy → write events).
-#
-# STEPS TO COMPLETE:
-# 1. Initialise session-state keys on first load (see _init_session_state).
-# 2. Render the intake form; on submit, package inputs and kick off the graph.
-# 3. While the graph is running, show a spinner / loading state.
-# 4. Once the graph reaches the human-approval node, display all three
-#    candidate schedules with rationales and violation badges.
-# 5. On strategy pick → resume graph → write events → show success.
-# 6. On reject all    → reset session → show "no changes made".
-# =============================================================================
+"""Streamlit compatibility UI using the same persistent service as the React app."""
 
 from pathlib import Path
+import os
 import sys
 
-# Streamlit executes this file as a script, so sys.path starts at src/.
-# Add the project root so absolute imports like src.frontend.* work.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
-  sys.path.insert(0, str(PROJECT_ROOT))
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import streamlit as st
 
+from config.settings import settings
+from src.domain.models import (
+    ApprovalRequest,
+    CreatePlan,
+    DraftUpdate,
+    Preferences,
+    Task,
+)
 from src.frontend.intake_form import render_intake_form
-from src.frontend.schedule_display import render_calendar_view
-from src.frontend.approval_controls import render_strategy_buttons
-from src.frontend.debug_panel import render_debug_trace
-from src.orchestration.graph import build_graph, run_graph_until_approval, resume_graph
+from src.planning.service import PlanningService
+from src.planning.store import PlanStore
 
 
-def _init_session_state() -> None:
-    """Ensure all required keys exist in st.session_state.
-
-    STEPS:
-    1. Set default values for:
-       - "graph_state"  → None   (holds paused LangGraph state)
-       - "phase"        → "intake"  (one of: intake | running | review | done)
-       - "result"       → None   (final result message to display)
-    2. Any additional keys your modules need can be added here.
-    """
-    defaults = {
-      "graph_state": None,
-      "graph": None,
-      "user_inputs": None,
-      "phase": "intake",
-      "result": None,
-    }
-    for key, value in defaults.items():
-      if key not in st.session_state:
-        st.session_state[key] = value
+@st.cache_resource
+def get_service():
+    return PlanningService(
+        PlanStore(
+            os.getenv("PLANNER_DB_PATH", str(PROJECT_ROOT / ".data/planner.sqlite3"))
+        )
+    )
 
 
 def _format_planning_error(exc: Exception) -> str:
     """Return a user-facing message for planning failures."""
     current: BaseException | None = exc
     while current is not None:
-      if "LLM API key is not set" in str(current):
-        return (
-          "LLM API key is not set. CALENDAR_MODE=mock skips Google Calendar "
-          "credentials, but planning still needs an LLM unless "
-          "LLM_PROVIDER=mock. Add LLM_API_KEY/GEMINI_API_KEY to .env or use "
-          "LLM_PROVIDER=mock and try again."
-        )
-      if "ANTHROPIC_API_KEY is not set" in str(current):
-        return (
-          "ANTHROPIC_API_KEY is not set. Set LLM_API_KEY, ANTHROPIC_API_KEY, "
-          "or use LLM_PROVIDER=mock and try again."
-        )
-      current = current.__cause__
+        if "LLM API key is not set" in str(current):
+            return (
+                "LLM API key is not set. CALENDAR_MODE=mock skips Google Calendar "
+                "credentials, but planning still needs an LLM unless "
+                "LLM_PROVIDER=mock. Add LLM_API_KEY/GEMINI_API_KEY to .env or use "
+                "LLM_PROVIDER=mock and try again."
+            )
+        if "ANTHROPIC_API_KEY is not set" in str(current):
+            return (
+                "ANTHROPIC_API_KEY is not set. Set LLM_API_KEY, ANTHROPIC_API_KEY, "
+                "or use LLM_PROVIDER=mock and try again."
+            )
+        current = current.__cause__
 
     return f"Planning failed: {exc}"
 
 
-def main() -> None:
-    """Top-level Streamlit page layout and control flow.
-
-    STEPS:
-    1. Call st.set_page_config with a title and layout.
-    2. Call _init_session_state().
-    3. Branch on st.session_state["phase"]:
-
-       "intake":
-         a. Call render_intake_form() — returns a dict of user inputs or None.
-         b. If the form was submitted, set phase to "running", store inputs.
-         c. Call st.rerun() so the spinner appears on next render cycle.
-
-       "running":
-         a. Show st.spinner("Agent is planning your schedule…").
-         b. Build the LangGraph graph via build_graph().
-         c. Call run_graph_until_approval(graph, user_inputs).
-         d. Store the returned paused state in session_state["graph_state"].
-         e. Set phase to "review" and st.rerun().
-
-       "review":
-         a. Extract the graph_state.
-         b. Call render_all_candidates(graph_state) — shows three columns
-            (or collapsed view if candidates_identical).
-         c. Call render_strategy_buttons(graph_state.get("candidates_identical", False)).
-         d. If ("approve", strategy_name):
-            - Set phase to "done".
-            - Call resume_graph(
-                graph, graph_state, approved=True, selected_strategy=strategy_name
-              ).
-            - Store success message in session_state["result"].
-         e. If ("reject", None):
-            - Set phase to "done".
-            - Store rejection message.
-         f. st.rerun().
-
-       "done":
-         a. Display st.session_state["result"] (success or rejection message).
-         b. Offer a "Start over" button that resets session state.
-    """
-    st.set_page_config(page_title="Calendar Planning Agent", layout="wide")
-    st.title("Calendar Planning Agent")
-    _init_session_state()
-
-    phase = st.session_state["phase"]
-
-    if phase == "intake":
-      user_inputs = render_intake_form()
-      if user_inputs is not None:
-        st.session_state["user_inputs"] = user_inputs
-        st.session_state["phase"] = "running"
+def main():
+    st.set_page_config(page_title="日序 · Calendar Planning", layout="wide")
+    st.title("日序 · Calendar Planning")
+    st.caption(
+        f"{'示範日曆' if settings.CALENDAR_MODE == 'mock' else settings.GOOGLE_CALENDAR_ID} · {settings.APP_TIMEZONE} · 計畫儲存於本機"
+    )
+    service = get_service()
+    if st.sidebar.button("新的規劃"):
+        st.query_params.clear()
+        st.session_state.pop("edit_plan", None)
         st.rerun()
-      return
+    for saved in service.store.list():
+        if st.sidebar.button(saved.goal, key=saved.id):
+            st.query_params["plan"] = saved.id
+            st.session_state.pop("edit_plan", None)
+            st.rerun()
+    try:
+        plan_id = st.query_params.get("plan")
+        if not plan_id:
+            inputs = render_intake_form()
+            if inputs:
+                prefs = Preferences(
+                    deadline=inputs["deadline"],
+                    timezone=settings.APP_TIMEZONE,
+                    work_start=inputs["work_start"].strftime("%H:%M"),
+                    work_end=inputs["work_end"].strftime("%H:%M"),
+                    max_session_minutes=inputs["max_session_minutes"],
+                    break_minutes=inputs["break_minutes"],
+                    energy_levels=inputs["energy_levels"],
+                )
+                plan = service.create(
+                    CreatePlan(
+                        goal=inputs["goal"],
+                        context=inputs["context"],
+                        preferences=prefs,
+                    )
+                )
+                st.query_params["plan"] = plan.id
+                with st.spinner("正在拆解目標…"):
+                    service.decompose(plan.id, plan.revision)
+                st.rerun()
+            return
+        plan = service.get(plan_id)
+        st.subheader(plan.goal)
+        st.caption(f"已保存 · v{plan.revision} · {plan.preferences.timezone}")
+        if not plan.tasks:
+            if st.button("繼續拆解目標"):
+                service.decompose(plan.id, plan.revision)
+                st.rerun()
+            return
+        if plan.status == "rejected":
+            st.info("計畫已結束，沒有新增日曆事件。")
+            return
+        if plan.status in {"completed", "partial", "writing"}:
+            if plan.status == "completed":
+                st.success(
+                    "已確認所有事件新增完成。"
+                    + (
+                        " Google Calendar 沒有變更。"
+                        if plan.calendar_mode == "mock"
+                        else ""
+                    )
+                )
+            else:
+                st.warning("寫入尚未全部確認。重試時會先核對已建立的事件。")
+            st.dataframe(
+                [
+                    {k: r.get(k) for k in ("name", "status", "error")}
+                    for r in plan.write_results
+                ],
+                hide_index=True,
+            )
+            if plan.status != "completed" and st.button("核對並繼續新增"):
+                candidate = next(
+                    c for c in plan.candidates if c.id == plan.selected_candidate
+                )
+                service.approve(
+                    plan.id,
+                    ApprovalRequest(
+                        revision=plan.revision,
+                        candidate_id=candidate.id,
+                        snapshot_hash=candidate.snapshot_hash,
+                        acknowledged_violation_ids=[
+                            v["id"] for v in candidate.validation["violations"]
+                        ],
+                    ),
+                )
+                st.rerun()
+            return
+        if plan.status == "draft" or st.session_state.get("edit_plan") == plan.id:
+            st.info(
+                "確認任務名稱、估時與依賴後，再建立方案。完整的依賴編輯與週曆可使用 React 工作區。"
+            )
+            rows = st.data_editor(
+                [task.model_dump() for task in plan.tasks],
+                disabled=["id", "depends_on"],
+                hide_index=True,
+                key=f"tasks-{plan.id}-{plan.revision}",
+            )
+            deadline = st.date_input(
+                "截止日期",
+                value=plan.preferences.deadline,
+                key=f"deadline-{plan.id}-{plan.revision}",
+            )
+            if st.button("儲存並建立方案", type="primary"):
+                prefs = plan.preferences.model_copy(update={"deadline": deadline})
+                updated = service.update(
+                    plan.id,
+                    DraftUpdate(
+                        revision=plan.revision,
+                        tasks=[Task.model_validate(row) for row in rows],
+                        preferences=prefs,
+                    ),
+                )
+                with st.spinner("正在讀取日曆並建立三種安排…"):
+                    service.generate(plan.id, updated.revision)
+                st.session_state.pop("edit_plan", None)
+                st.rerun()
+            return
+        if plan.status == "needs_review":
+            st.warning("日曆有新的變化。請重新檢視並逐項確認限制。")
+        names = {
+            "deadline_first": "提早完成",
+            "min_fragmentation": "集中安排",
+            "energy_aware": "配合精力",
+        }
+        selected = st.radio(
+            "選擇方案",
+            [c.id for c in plan.candidates],
+            format_func=lambda key: names[key],
+            horizontal=True,
+            index=next(
+                (
+                    i
+                    for i, c in enumerate(plan.candidates)
+                    if c.id == plan.selected_candidate
+                ),
+                0,
+            ),
+            disabled=plan.approval is not None,
+        )
+        candidate = next(c for c in plan.candidates if c.id == selected)
+        st.write(candidate.explanation)
+        st.caption(
+            f"{candidate.metrics['scheduled_tasks']}/{candidate.metrics['total_tasks']} 項任務已排入 · {candidate.metrics['scheduled_minutes']} 分鐘"
+        )
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
 
-    if phase == "running":
-      try:
-        with st.spinner("Agent is planning your schedule..."):
-          graph = build_graph()
-          paused_state = run_graph_until_approval(graph, st.session_state["user_inputs"])
-      except Exception as exc:
-        st.session_state["graph"] = None
-        st.session_state["graph_state"] = None
-        st.session_state["phase"] = "intake"
+        zone = ZoneInfo(plan.preferences.timezone)
+        st.dataframe(
+            [
+                {
+                    "任務": e["name"],
+                    "開始": datetime.fromisoformat(e["start"])
+                    .astimezone(zone)
+                    .strftime("%m/%d %H:%M"),
+                    "結束": datetime.fromisoformat(e["end"])
+                    .astimezone(zone)
+                    .strftime("%m/%d %H:%M"),
+                }
+                for e in candidate.events
+            ],
+            hide_index=True,
+        )
+        acknowledged = []
+        for issue in candidate.validation["violations"]:
+            if st.checkbox(
+                f"我了解並接受：{issue['event_name']} — {issue['description']}",
+                key=f"ack-{plan.id}-{plan.revision}-{selected}-{issue['id']}",
+            ):
+                acknowledged.append(issue["id"])
+        if not plan.approval and st.button("調整任務"):
+            st.session_state["edit_plan"] = plan.id
+            st.rerun()
+        st.caption(
+            f"將新增 {len(candidate.events)} 個事件到 {'示範日曆（不會寫入 Google Calendar）' if plan.calendar_mode == 'mock' else plan.calendar_id}。"
+        )
+        if st.button(
+            "確認新增",
+            type="primary",
+            disabled=not candidate.events
+            or len(acknowledged) != len(candidate.validation["violations"]),
+        ):
+            service.approve(
+                plan.id,
+                ApprovalRequest(
+                    revision=plan.revision,
+                    candidate_id=selected,
+                    snapshot_hash=candidate.snapshot_hash,
+                    acknowledged_violation_ids=acknowledged,
+                ),
+            )
+            st.rerun()
+        if not plan.approval and st.button("不採用"):
+            service.reject(plan.id, plan.revision)
+            st.rerun()
+    except Exception as exc:
         st.error(_format_planning_error(exc))
-        return
-
-      st.session_state["graph"] = graph
-      st.session_state["graph_state"] = paused_state
-      st.session_state["phase"] = "review"
-      st.rerun()
-      return
-
-    if phase == "review":
-      graph_state = st.session_state.get("graph_state")
-      if not graph_state:
-        st.error("Missing planning state. Please start over.")
-        st.session_state["phase"] = "done"
-        st.session_state["result"] = "Planning state was lost. No calendar changes were made."
-        st.rerun()
-        return
-
-      active_strategy = render_calendar_view(graph_state)
-      action, strategy_name = render_strategy_buttons(
-        graph_state.get("candidates_identical", False),
-        active_strategy=active_strategy,
-      )
-      render_debug_trace(graph_state)
-
-      if action == "approve" and strategy_name is not None:
-        graph = st.session_state.get("graph") or build_graph()
-        final_state = resume_graph(
-          graph,
-          graph_state,
-          approved=True,
-          selected_strategy=strategy_name,
-        )
-
-        written_count = len(final_state.get("write_results", []))
-        st.session_state["result"] = (
-          f"Schedule approved with strategy '{strategy_name}'. "
-          f"Created {written_count} calendar event(s)."
-        )
-        st.session_state["graph_state"] = final_state
-        st.session_state["phase"] = "done"
-        st.rerun()
-        return
-
-      if action == "reject":
-        graph = st.session_state.get("graph") or build_graph()
-        final_state = resume_graph(graph, graph_state, approved=False)
-
-        st.session_state["result"] = "Schedule rejected. No calendar changes were made."
-        st.session_state["graph_state"] = final_state
-        st.session_state["phase"] = "done"
-        st.rerun()
-        return
-
-      return
-
-    if phase == "done":
-      result_message = st.session_state.get("result")
-      if result_message:
-        st.success(result_message)
-
-      graph_state = st.session_state.get("graph_state")
-      if graph_state:
-        render_debug_trace(graph_state)
-
-      if st.button("Start over", type="primary"):
-        for key in ["graph_state", "graph", "user_inputs", "result"]:
-          st.session_state[key] = None
-        st.session_state["phase"] = "intake"
-        st.rerun()
+        st.caption("已保存的內容仍保留。可從側欄重新開啟計畫。")
 
 
 if __name__ == "__main__":

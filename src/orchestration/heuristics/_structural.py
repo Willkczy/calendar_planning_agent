@@ -95,7 +95,7 @@ def complexity_score(subtask: Subtask) -> int:
     Generalisation note: we never inspect names/descriptions for keywords
     (no `if "install" in name`) so this stays usable for any domain.
     """
-    raw = tag_map(subtask).get("complexity")
+    raw = subtask.get("complexity") or tag_map(subtask).get("complexity")
     if raw and raw in COMPLEXITY_SCORE:
         return COMPLEXITY_SCORE[raw]
 
@@ -109,10 +109,7 @@ def complexity_score(subtask: Subtask) -> int:
 
 def has_any_structural_tags(subtasks: list[Subtask]) -> bool:
     """Return True if any subtask carries any [key:value] tag."""
-    return any(
-        TAG_PATTERN.search(f"{s['name']} {s['description']}")
-        for s in subtasks
-    )
+    return any(TAG_PATTERN.search(f"{s['name']} {s['description']}") for s in subtasks)
 
 
 def safe_structural_shuffle(

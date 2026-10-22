@@ -740,6 +740,7 @@ class TestValidateCandidates:
             "work_start": "09:00",
             "work_end": "18:00",
             "deadline": "2026-04-17T18:00:00+00:00",
+            "timezone": "UTC",
             "candidate_deadline_first": clean_candidate,
             "candidate_min_fragmentation": overlapping_candidate,
             "candidate_energy_aware": late_candidate,
@@ -779,6 +780,7 @@ class TestValidateCandidates:
             "work_start": "09:00",
             "work_end": "18:00",
             "deadline": "2026-04-17",
+            "timezone": "UTC",
             "candidate_deadline_first": candidate,
             "candidate_min_fragmentation": list(candidate),
             "candidate_energy_aware": list(candidate),
@@ -1224,41 +1226,6 @@ class TestLiveCalendarNodeIntegration:
         assert result["busy_blocks"] == []
         assert result["free_slots"] == []
 
-    def test_write_events_live_uses_configured_calendar_id(self, monkeypatch):
-        state = {
-            "final_schedule": [
-                {
-                    "name": "Learn SQL",
-                    "description": "Read indexing chapter",
-                    "start": "2026-04-06T10:00:00+00:00",
-                    "end": "2026-04-06T11:00:00+00:00",
-                }
-            ]
-        }
-        observed: dict[str, Any] = {}
-
-        monkeypatch.setattr("src.orchestration.nodes.write_events.settings.CALENDAR_MODE", "live")
-        monkeypatch.setattr(
-            "src.orchestration.nodes.write_events.settings.GOOGLE_CALENDAR_ID",
-            "learning-calendar@example.com",
-        )
-        monkeypatch.setattr(
-            "src.orchestration.nodes.write_events.settings.AGENT_EVENT_COLOR_ID",
-            "10",
-        )
-
-        def _fake_create_events_batch(events, calendar_id, color_id=None):
-            observed["calendar_id"] = calendar_id
-            observed["color_id"] = color_id
-            return [{"id": "evt-123"}]
-
-        monkeypatch.setattr(
-            "src.calendar_api.events.create_events_batch",
-            _fake_create_events_batch,
-        )
-
-        result = write_events_node(state)
-
-        assert observed["calendar_id"] == "learning-calendar@example.com"
-        assert observed["color_id"] == "10"
-        assert result["write_results"] == [{"id": "evt-123"}]
+    def test_write_node_requires_an_approved_stable_plan(self):
+        with pytest.raises(ValueError, match="approved plan"):
+            write_events_node({"final_schedule": []})

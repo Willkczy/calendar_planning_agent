@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import datetime
 import operator
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, TypedDict, NotRequired
 
 
 class Subtask(TypedDict):
@@ -22,6 +22,9 @@ class Subtask(TypedDict):
     name: str                   # Short title, e.g. "Set up React dev environment"
     description: str            # 1–2 sentence description of the work
     duration_minutes: int       # Estimated duration in minutes
+    id: NotRequired[str]
+    complexity: NotRequired[str]
+    depends_on: NotRequired[list[str]]
 
 
 class ProposedEvent(TypedDict):
@@ -30,6 +33,9 @@ class ProposedEvent(TypedDict):
     description: str            # Subtask description
     start: str                  # ISO 8601 datetime string
     end: str                    # ISO 8601 datetime string
+    id: NotRequired[str]
+    task_id: NotRequired[str]
+    segment_id: NotRequired[int]
 
 
 class Violation(TypedDict):
@@ -64,6 +70,9 @@ class AgentState(TypedDict, total=False):
 
     # --- User inputs (set once at the start) ---
     goal: str
+    plan_id: str
+    timezone: str
+    revision: int
     deadline: str                               # ISO date string
     context: str
     work_start: str                             # "HH:MM"

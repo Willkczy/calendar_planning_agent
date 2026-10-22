@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime
 import uuid
+from zoneinfo import ZoneInfo
 from typing import Any
 
 
@@ -125,13 +126,13 @@ def _parse_hhmm(value: str) -> datetime.time:
     return datetime.time(int(hour), int(minute), tzinfo=datetime.timezone.utc)
 
 
-def _events_on_day(day: datetime.date) -> list[dict[str, str]]:
+def _events_on_day(day: datetime.date, tz=datetime.timezone.utc) -> list[dict[str, str]]:
     """Concrete event dicts for the weekday pattern on `day`, UTC-anchored."""
     pattern = _WEEKDAY_PATTERN.get(day.weekday(), [])
     events: list[dict[str, str]] = []
     for _summary, start_str, end_str in pattern:
-        start_dt = datetime.datetime.combine(day, _parse_hhmm(start_str))
-        end_dt = datetime.datetime.combine(day, _parse_hhmm(end_str))
+        start_dt = datetime.datetime.combine(day, _parse_hhmm(start_str)).replace(tzinfo=tz)
+        end_dt = datetime.datetime.combine(day, _parse_hhmm(end_str)).replace(tzinfo=tz)
         events.append(
             {
                 "start": start_dt.isoformat(),
@@ -144,6 +145,7 @@ def _events_on_day(day: datetime.date) -> list[dict[str, str]]:
 def fetch_mock_busy_blocks(
     time_min: datetime.datetime,
     time_max: datetime.datetime,
+    timezone: str | None = None,
 ) -> list[dict[str, str]]:
     """Return mock busy blocks within the given time window.
 
@@ -168,7 +170,7 @@ def fetch_mock_busy_blocks(
     last_day = time_max.date()
 
     while current <= last_day:
-        for event in _events_on_day(current):
+        for event in _events_on_day(current, ZoneInfo(timezone) if timezone else datetime.timezone.utc):
             event_start = datetime.datetime.fromisoformat(event["start"])
             event_end = datetime.datetime.fromisoformat(event["end"])
             if event_end <= time_min or event_start >= time_max:

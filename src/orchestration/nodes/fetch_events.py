@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from config.settings import settings
 from src.calendar_api.free_slots import compute_free_slots
+from src.domain.time import deadline_boundary
 from src.orchestration.debug_trace import make_trace_event, trace_update
 from src.orchestration.state import AgentState
 
@@ -63,18 +64,14 @@ def fetch_events_node(state: AgentState) -> dict[str, Any]:
    work_end = datetime.time.fromisoformat(work_end_raw)
 
    try:
-      tz = ZoneInfo(settings.APP_TIMEZONE)
+      tz = ZoneInfo(state.get("timezone", settings.APP_TIMEZONE))
    except ZoneInfoNotFoundError as exc:
       raise ValueError(
          f"fetch_events_node: invalid APP_TIMEZONE {settings.APP_TIMEZONE!r}"
       ) from exc
 
    time_min = datetime.datetime.now(tz=tz)
-   time_max = datetime.datetime.combine(
-      deadline_date,
-      datetime.time(23, 59, 59, 999999),
-      tzinfo=tz,
-   )
+   time_max = deadline_boundary(deadline_raw, str(tz))
 
    if time_max <= time_min:
       raise ValueError(

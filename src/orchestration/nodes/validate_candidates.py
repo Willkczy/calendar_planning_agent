@@ -23,6 +23,8 @@ from src.orchestration.debug_trace import (
 )
 from src.orchestration.state import AgentState
 from src.validator.constraints import validate_schedule
+from src.domain.time import deadline_boundary
+from config.settings import settings
 
 
 def validate_candidates_node(state: AgentState) -> dict[str, Any]:
@@ -71,18 +73,8 @@ def validate_candidates_node(state: AgentState) -> dict[str, Any]:
    work_start = datetime.time.fromisoformat(state["work_start"])
    work_end = datetime.time.fromisoformat(state["work_end"])
 
-   deadline_raw = state["deadline"]
-   try:
-      deadline_dt = datetime.datetime.fromisoformat(deadline_raw)
-      if deadline_dt.tzinfo is None:
-         deadline_dt = deadline_dt.replace(tzinfo=datetime.timezone.utc)
-   except ValueError:
-      deadline_date = datetime.date.fromisoformat(deadline_raw)
-      deadline_dt = datetime.datetime.combine(
-         deadline_date,
-         datetime.time(23, 59, 59, 999999),
-         tzinfo=datetime.timezone.utc,
-      )
+   timezone = state.get("timezone", settings.APP_TIMEZONE)
+   deadline_dt = deadline_boundary(state["deadline"], timezone)
 
    validations = {
       "deadline_first": validate_schedule(
@@ -91,6 +83,10 @@ def validate_candidates_node(state: AgentState) -> dict[str, Any]:
          work_start,
          work_end,
          deadline_dt,
+         timezone=timezone,
+         subtasks=state.get("subtasks"),
+         max_session_minutes=state.get("max_session_minutes"),
+         break_minutes=state.get("break_minutes", 0),
       ),
       "min_fragmentation": validate_schedule(
          state["candidate_min_fragmentation"],
@@ -98,6 +94,10 @@ def validate_candidates_node(state: AgentState) -> dict[str, Any]:
          work_start,
          work_end,
          deadline_dt,
+         timezone=timezone,
+         subtasks=state.get("subtasks"),
+         max_session_minutes=state.get("max_session_minutes"),
+         break_minutes=state.get("break_minutes", 0),
       ),
       "energy_aware": validate_schedule(
          state["candidate_energy_aware"],
@@ -105,6 +105,10 @@ def validate_candidates_node(state: AgentState) -> dict[str, Any]:
          work_start,
          work_end,
          deadline_dt,
+         timezone=timezone,
+         subtasks=state.get("subtasks"),
+         max_session_minutes=state.get("max_session_minutes"),
+         break_minutes=state.get("break_minutes", 0),
       ),
    }
 

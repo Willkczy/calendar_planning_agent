@@ -1,66 +1,15 @@
-# =============================================================================
-# src/orchestration/graph.py — LangGraph directed-graph definition
-# =============================================================================
-# Assembles all nodes and edges into the stateful directed graph.
-# Provides helper functions used by app.py to run and resume the graph.
-#
-# GRAPH TOPOLOGY (user-choice model):
-#
-#   START
-#     │
-#     ▼
-#   decompose_goal
-#     │
-#     ▼
-#   decomposition_critic
-#     │
-#     ├──── revise_decomposition (at most once, only when critic requests it)
-#     │
-#     ▼
-#   fetch_events  (fetches calendar + computes free slots)
-#     │
-#     ├──────────────────┬────────────────────┐
-#     ▼                  ▼                    ▼
-#   deadline_first   min_fragmentation   energy_aware   (parallel branches)
-#     │                  │                    │
-#     └──────────────────┴────────────────────┘
-#                        │
-#                        ▼
-#                validate_candidates  (run validator on all 3, no winner picked)
-#                        │
-#                        ▼
-#                review_candidates  (multi-agent reviewers score all strategies)
-#                        │
-#                        ▼
-#                generate_rationales  (LLM writes one rationale per strategy)
-#                        │
-#                        ▼
-#                  build_proposal     (detect near-duplicates, package for UI)
-#                        │
-#                        ▼
-#                  human_approval  ← (pause here, user picks a strategy or rejects)
-#                    │         │
-#               pick strategy  reject all
-#                    │         │
-#                    ▼         ▼
-#              write_events   END
-#                    │
-#                    ▼
-#                   END
-#
-# STEPS TO COMPLETE:
-# 1. Import all node functions from src/orchestration/nodes/.
-# 2. Build the StateGraph using the AgentState TypedDict.
-# 3. Add nodes, edges, and conditional edges per the topology above.
-# 4. Implement the two helper functions used by app.py.
-#
-# NOTE: No repair loop or score/pick-a-winner step. All three candidates
-# are validated and presented to the user, who picks a strategy or rejects all.
-# =============================================================================
+"""Optional research pipeline: critique, three heuristics, reviews, explanations.
+
+The graph ends after proposal generation. Human decisions and durable writes
+belong to PlanningService. The run/resume names remain compatibility adapters;
+they do not claim to resume a checkpointed LangGraph execution.
+"""
 
 from __future__ import annotations
 
 import datetime
+import uuid
+from config.settings import settings
 from typing import Any
 
 from langgraph.graph import StateGraph, END
@@ -95,13 +44,7 @@ STRATEGY_TO_STATE_KEY = {
 
 
 def _approval_decision(state: AgentState) -> str:
-    """Conditional edge after human approval.
-
-    STEPS:
-    1. If state["user_approved"] is True and state["selected_strategy"] is set
-       → return "write_events".
-    2. Otherwise (rejected or no strategy chosen) → return END.
-    """
+    """Return the write step only for an explicit strategy approval."""
     if state.get("user_approved") is True and state.get("selected_strategy"):
         return "write_events"
     return END
@@ -129,56 +72,8 @@ def _apply_node_updates(state: AgentState, updates: dict[str, Any]) -> None:
             state[key] = value
 
 
-def build_graph() -> StateGraph:
-    """Construct and compile the LangGraph directed graph.
-
-    STEPS:
-    1. Create graph = StateGraph(AgentState).
-    2. Add nodes:
-       graph.add_node("decompose_goal",        decompose_goal_node)
-       graph.add_node("decomposition_critic", decomposition_critic_node)
-       graph.add_node("revise_decomposition", revise_decomposition_node)
-       graph.add_node("fetch_events",           fetch_events_node)
-       graph.add_node("deadline_first",         deadline_first_node)
-       graph.add_node("min_fragmentation",      min_fragmentation_node)
-       graph.add_node("energy_aware",           energy_aware_node)
-       graph.add_node("validate_candidates",    validate_candidates_node)
-       graph.add_node("review_candidates",      review_candidates_node)
-       graph.add_node("generate_rationales",    generate_rationales_node)
-       graph.add_node("build_proposal",         build_proposal_node)
-       graph.add_node("human_approval",         human_approval_node)
-       graph.add_node("write_events",           write_events_node)
-
-    3. Set entry point:
-       graph.set_entry_point("decompose_goal")
-
-    4. Add edges:
-       decompose_goal → decomposition_critic
-       decomposition_critic → revise_decomposition or fetch_events
-       revise_decomposition → fetch_events
-       fetch_events   → [deadline_first, min_fragmentation, energy_aware]
-         (fan-out: all three run in parallel)
-       deadline_first       → validate_candidates
-       min_fragmentation    → validate_candidates
-       energy_aware         → validate_candidates
-         (fan-in: validate_candidates waits for all three)
-       validate_candidates  → review_candidates
-       review_candidates    → generate_rationales
-       generate_rationales  → build_proposal
-       build_proposal       → human_approval
-       human_approval       → conditional(_approval_decision)
-       write_events         → END
-
-    5. Compile with interrupt_before=["human_approval"] and return.
-
-    NOTE on parallelism:
-    - LangGraph supports fan-out / fan-in natively.
-    - The three heuristic nodes write to separate state keys
-      (candidate_deadline_first, candidate_min_fragmentation,
-       candidate_energy_aware) so no reducer conflict.
-    - If using an older LangGraph version, run them sequentially
-      and refactor to parallel later.
-    """
+def build_graph() -> Any:
+    """Compile the optional research graph, ending at build_proposal."""
     graph = StateGraph(AgentState)
 
     graph.add_node("decompose_goal", decompose_goal_node)
@@ -192,8 +87,6 @@ def build_graph() -> StateGraph:
     graph.add_node("review_candidates", review_candidates_node)
     graph.add_node("generate_rationales", generate_rationales_node)
     graph.add_node("build_proposal", build_proposal_node)
-    graph.add_node("human_approval", human_approval_node)
-    graph.add_node("write_events", write_events_node)
 
     graph.set_entry_point("decompose_goal")
 
@@ -219,58 +112,17 @@ def build_graph() -> StateGraph:
     graph.add_edge("validate_candidates", "review_candidates")
     graph.add_edge("review_candidates", "generate_rationales")
     graph.add_edge("generate_rationales", "build_proposal")
-    graph.add_edge("build_proposal", "human_approval")
-
-    graph.add_conditional_edges(
-        "human_approval",
-        _approval_decision,
-        {
-            "write_events": "write_events",
-            END: END,
-        },
-    )
-    graph.add_edge("write_events", END)
-
-    return graph.compile(interrupt_before=["human_approval"])
+    # Research graph only produces proposals. Durable approval and writing
+    # belong to PlanningService; no pretend graph interrupt/manual resume pair.
+    graph.add_edge("build_proposal", END)
+    return graph.compile()
 
 
 def run_graph_until_approval(
     graph: Any,
     user_inputs: dict[str, Any],
 ) -> AgentState:
-    """Execute the graph from START up to the human_approval node.
-
-    This function is called by app.py when the user submits the intake form.
-    The graph should run all nodes up to and including build_proposal, then
-    pause at human_approval waiting for the user's decision.
-
-    Args:
-        graph: Compiled LangGraph graph object.
-        user_inputs: Dict from the intake form (goal, deadline, etc.).
-
-    Returns:
-        The paused AgentState dict containing the proposed schedule,
-        rationale, and any unresolved violations.
-
-    STEPS:
-    1. Build the initial state from user_inputs:
-       initial_state = AgentState(
-           goal=user_inputs["goal"],
-           deadline=user_inputs["deadline"].isoformat(),
-           context=user_inputs.get("context", ""),
-           work_start=user_inputs["work_start"].strftime("%H:%M"),
-           work_end=user_inputs["work_end"].strftime("%H:%M"),
-           max_session_minutes=user_inputs["max_session_minutes"],
-           break_minutes=user_inputs.get("break_minutes", 10),
-           selected_strategy=None,
-           user_approved=None,
-       )
-    2. Invoke the graph with the initial state.
-       - The graph pauses at human_approval (interrupt_before).
-       - At this point, state contains all three candidates,
-         their validations, their rationales, and candidates_identical.
-    3. Return the paused state.
-    """
+    """Generate a research proposal with a stable plan ID and explicit timezone."""
     required_keys = {
         "goal",
         "deadline",
@@ -304,6 +156,8 @@ def run_graph_until_approval(
         work_end_value = str(work_end_input)
 
     initial_state: AgentState = {
+        "plan_id": uuid.uuid4().hex,
+        "timezone": str(user_inputs.get("timezone", settings.APP_TIMEZONE)),
         "goal": str(user_inputs["goal"]),
         "deadline": deadline_value,
         "context": str(user_inputs.get("context", "")),
@@ -333,27 +187,7 @@ def resume_graph(
     approved: bool,
     selected_strategy: str | None = None,
 ) -> AgentState:
-    """Resume graph execution after the user approves or rejects.
-
-    Args:
-        graph: Compiled LangGraph graph object.
-        paused_state: State dict returned by run_graph_until_approval.
-        approved: True if user clicked approve, False if rejected.
-        selected_strategy: Strategy selected by the user when approved=True.
-
-    Returns:
-        Final AgentState after write_events or clean end.
-
-    STEPS:
-    1. Set paused_state["user_approved"] = approved.
-    2. If approved:
-       a. Validate selected_strategy.
-       b. Set paused_state["selected_strategy"] to the user's chosen strategy.
-       c. Set paused_state["final_schedule"] to the candidate matching
-          the selected strategy.
-    3. Resume graph execution from the human_approval node.
-    4. Return the final state.
-    """
+    """Compatibility adapter: apply a human decision, then use the durable writer."""
     _ = graph
     resumed_state: AgentState = dict(paused_state)
     resumed_state["user_approved"] = approved

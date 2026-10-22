@@ -297,6 +297,19 @@ def _call_openai_compatible(
 
 def _call_mock(prompt: str, *, purpose: str) -> str:
     """Return deterministic local LLM responses for mock-mode walkthroughs."""
+    if "WORKSPACE_TASK_SCHEMA_V1" in prompt:
+        # Explicit example data, shown as mock in both clients.
+        names = ["釐清目標與完成標準", "蒐集參考資料", "拆解實作步驟", "完成核心成果", "檢查與修正", "整理並交付"]
+        durations = [30, 45, 45, 90, 60, 30]
+        dependencies = [[], ["task-1"], ["task-1"], ["task-2", "task-3"], ["task-4"], ["task-5"]]
+        import re
+        limit_match = re.search(r"at most (\d+)", prompt)
+        limit = int(limit_match.group(1)) if limit_match else 120
+        return json.dumps([{"id": f"task-{i + 1}", "name": name,
+                            "description": "這是示範任務；請依照你的目標修改內容與估時。",
+                            "duration_minutes": min(durations[i], limit),
+                            "complexity": ["low", "medium", "medium", "high", "medium", "low"][i],
+                            "depends_on": dependencies[i]} for i, name in enumerate(names)])
     _ = prompt
     if purpose == "rationale":
         return (

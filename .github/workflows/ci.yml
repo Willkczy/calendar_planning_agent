@@ -1,12 +1,8 @@
 # =============================================================================
 # .github/workflows/ci.yml — GitHub Actions CI pipeline
 # =============================================================================
-# Runs the no-credentials programmatic test suite on every push and PR.
-#
-# tests/pipeline_unit/ and tests/llm_integration/ require Google ADC and
-# call the real Vertex AI API. They are dev-time verification only and run
-# locally — see docs/EXPERIMENTAL_SETUP.md. Wiring them into CI requires
-# a GCP service account or workload identity federation; not yet set up.
+# Runs offline Python tests and the React mock workflow. Live LLM evaluations
+# remain opt-in; mixed pipeline fixtures skip their live cases in mock mode.
 # =============================================================================
 
 name: CI
@@ -19,7 +15,7 @@ on:
 
 jobs:
   fast-tests:
-    name: Programmatic tests (mocked, no credentials)
+    name: Offline Python tests
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -43,4 +39,27 @@ jobs:
         env:
           CALENDAR_MODE: mock
           LLM_PROVIDER: mock
-        run: pytest -q tests/programmatic/
+        run: pytest -q tests/ --ignore=tests/llm_integration
+
+  web-tests:
+    name: React build and mock browser flows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: pip install -r requirements.txt
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - run: npm run test:e2e
+        working-directory: web

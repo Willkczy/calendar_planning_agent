@@ -1,210 +1,81 @@
 # Developer Guide
 
-This is the concise day-to-day guide. For architecture, read `docs/ARCHITECTURE.md`. For current progress and gaps, read `docs/STATUS.md`.
+Use [STATUS.md](STATUS.md) for current verification results and [ARCHITECTURE.md](ARCHITECTURE.md) for contracts. The active product workflow is React → FastAPI → PlanningService. Streamlit and the optional research graph share the same approval writer.
 
-## Setup
+## Setup and run
+
+macOS/Linux, Python 3.11+, Node.js 22.12+ (Node 24 in CI). From the repository root:
 
 ```bash
 python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+npm --prefix web ci
+npm --prefix web run build
+CALENDAR_MODE=mock LLM_PROVIDER=mock .venv/bin/python -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Open [localhost:8000](http://127.0.0.1:8000). Building before starting the API mounts the bundled frontend. For development run the API with `--reload`, then `npm --prefix web run dev` in another terminal. Vite uses port 5173 and proxies `/api` to port 8000.
+
+For the Streamlit compatibility UI:
+
+```bash
+CALENDAR_MODE=mock LLM_PROVIDER=mock .venv/bin/python -m streamlit run src/app.py
+```
+
+Both entry points use `.data/planner.sqlite3`. To isolate experiments, set `PLANNER_DB_PATH=/absolute/path/experiment.sqlite3` before starting either process. Preserve the database and associated SQLite files when backing up live write history; deleting the ledger loses approval/reconciliation history. Mock events are saved and count as busy in later plans.
+
+`.env.example` defaults to mock LLM and calendar. Copy it to `.env` only if you do not already have a local configuration. Explicit shell variables take precedence. Keep `.env` and all credentials out of Git.
+
+## Dependencies
+
+`pyproject.toml` is the Python dependency source. `requirements.txt` installs the project with development dependencies instead of repeating ranges. Python transitive dependencies are not locked yet. `web/package-lock.json` locks the frontend; use `npm ci` for repeatable installation.
+
+## Offline verification
+
+```bash
+CALENDAR_MODE=mock LLM_PROVIDER=mock .venv/bin/pytest tests/ -q --ignore=tests/llm_integration
+npm --prefix web run build
+.venv/bin/python -m pip check
+git diff --check
+```
+
+`tests/programmatic/test_planning_service.py` exercises persistence, stale approvals, partial writes, lost responses, repeated approval, preflight changes, API boundaries, locks, and fail-closed behavior. `test_planning_correctness.py` covers task coverage/DAG and time/DST/calendar semantics. Older programmatic and pipeline tests remain in place. The mixed pipeline suite skips real-LLM fixtures when `LLM_PROVIDER=mock`; skips are not passing live tests.
+
+Browser regression tests:
+
+```bash
 source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
+npm --prefix web exec -- playwright install chromium
+npm --prefix web run build
+npm --prefix web run test:e2e
 ```
 
-Mock calendar mode does not require Google credentials. Use `LLM_PROVIDER=mock`
-for a fully local walkthrough that also skips paid/hosted LLM calls:
+The Playwright configuration starts its own API on port 8010 with a temporary mock database. It runs edit/approve/reload and edit/reject flows at desktop and mobile sizes. It never uses the normal saved-plan database. CI installs Chromium with OS dependencies and runs these tests. Check STATUS for whether a particular browser run was actually executed; adding tests is not evidence of a passing run.
+
+Manual acceptance flow:
+
+1. Create a goal, edit a task name/duration/dependency, and generate all three candidates.
+2. Switch strategies; verify coverage, dates, agenda, and week view update together in the selected timezone.
+3. Return to editing, change a task, and regenerate; verify the revision changes.
+4. Open the approval summary, inspect events/calendar/timezone, and explicitly acknowledge any violations.
+5. Confirm in mock mode, reload, and inspect each saved write result. Repeating approval should preserve event identities.
+6. Create another plan and reject it; verify zero writes. Repeat the comparison flow on a narrow viewport.
+
+## Optional live evaluation
+
+All providers continue through `src/llm_client/client.py`: `anthropic`, `gemini`, `vertex_ai`, `openai_compatible`, and `mock`. Configure the provider's key or Google ADC and model in your local `.env`. Calendar and LLM modes are independent: `CALENDAR_MODE=mock` alone does not disable paid LLM calls.
 
 ```bash
-CALENDAR_MODE=mock LLM_PROVIDER=mock streamlit run src/app.py
+# Explicit opt-in: real provider calls, mock calendar
+CALENDAR_MODE=mock LLM_PROVIDER=vertex_ai .venv/bin/pytest tests/llm_integration/ -v -m integration
 ```
 
-## Test
+Live Google Calendar uses the existing installed-app OAuth flow and local token file. Validate it against a dedicated test calendar before real use. Public deployment needs web OAuth, authentication, token isolation, and durable jobs; current container/AWS scaffolding is not a verified deployment of the new workspace.
 
-### Fast suite — no credentials needed (~2 s)
+## Change rules
 
-Programmatic unit tests + pipeline unit tests. Safe for CI.
-
-```bash
-CALENDAR_MODE=mock .venv/bin/pytest tests/ -q --ignore=tests/llm_integration
-```
-
-Targeted runs:
-
-```bash
-CALENDAR_MODE=mock .venv/bin/pytest -q tests/programmatic/test_llm_client.py
-CALENDAR_MODE=mock .venv/bin/pytest -q tests/programmatic/test_orchestration.py
-CALENDAR_MODE=mock .venv/bin/pytest -q tests/pipeline_unit/
-```
-
-### LLM integration suite — real API calls (~60–90 s)
-
-Sends genuine prompts to Vertex AI / Gemini 2.5 Flash. Requires Google ADC credentials
-(service-account JSON or `gcloud auth application-default login`).
-
-```bash
-CALENDAR_MODE=mock .venv/bin/pytest tests/llm_integration/ -v -m integration -s
-```
-
-The suite auto-skips if credentials are absent. See `docs/LLM_INTEGRATION_TEST_TRACE.md`
-for the full test inventory and assertion design rationale.
-
-### Test layout
-
-```
-tests/
-  programmatic/      # 118 tests — unit tests for all src/ modules, mocked LLM/Calendar
-  pipeline_unit/     # 100 tests — orchestration pipeline logic, mocked LLM (T01–T99)
-  llm_integration/   # 25 tests  — real LLM API calls, @pytest.mark.integration
-```
-
-## Local App Smoke Test
-
-Run:
-
-```bash
-CALENDAR_MODE=mock LLM_PROVIDER=mock streamlit run src/app.py
-```
-
-Walkthrough to record:
-
-1. Submit intake form.
-2. Confirm all candidate schedules render.
-3. Approve one strategy and confirm mock events are created.
-4. Restart and reject all, confirming no writes.
-5. Expand "Debug trace" and copy the compact report if a schedule looks wrong.
-
-## Environment Variables
-
-Key values from `.env.example`:
-
-- `LLM_PROVIDER` -- `anthropic`, `gemini`, `vertex_ai`, `openai_compatible`, or `mock`
-- `LLM_API_KEY` -- generic key for Gemini/OpenAI-compatible providers
-- `GEMINI_API_KEY` -- optional Gemini-specific key
-- `VERTEX_PROJECT_ID` -- Google Cloud project for Vertex AI
-- `VERTEX_LOCATION` -- Vertex AI location, defaults to `global`
-- `ANTHROPIC_API_KEY` -- legacy Anthropic-specific key
-- `LLM_BASE_URL` -- required for `LLM_PROVIDER=openai_compatible`
-- `LLM_DECOMPOSITION_MODEL`
-- `LLM_RATIONALE_MODEL`
-- `GOOGLE_CLIENT_SECRET_FILE`
-- `CALENDAR_MODE`
-- `DEFAULT_WORK_START`
-- `DEFAULT_WORK_END`
-
-Use `CALENDAR_MODE=mock` unless explicitly testing live Google Calendar behavior.
-Use `LLM_PROVIDER=mock` unless explicitly testing a live LLM provider.
-
-### `.env` vs `.env.example` divergence
-
-`.env.example` is the **safe shared default**: `CALENDAR_MODE=mock`,
-`LLM_DECOMPOSITION_MODEL=google/gemini-2.5-flash`. Anything you put in
-your local `.env` is allowed to deviate — common reasons:
-
-- `CALENDAR_MODE=live` while debugging Google Calendar writes.
-- `LLM_DECOMPOSITION_MODEL=google/gemini-3.1-pro-preview` to try a
-  newer Vertex AI preview model on a single machine.
-- `GOOGLE_CALENDAR_ID` set to a personal calendar id rather than
-  `primary`.
-
-These local overrides are **never** committed (`.env` is gitignored).
-If you change a value that should affect everyone, update
-`.env.example` in the same commit. Run a fast smoke
-(`CALENDAR_MODE=mock LLM_PROVIDER=mock streamlit run src/app.py`)
-after editing `.env` to confirm the app still boots.
-
-Gemini example:
-
-```dotenv
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=<your Gemini API key>
-LLM_DECOMPOSITION_MODEL=gemini-2.5-flash
-LLM_RATIONALE_MODEL=gemini-2.5-flash
-```
-
-Vertex AI example using Google Cloud credits:
-
-```bash
-gcloud auth application-default login
-gcloud auth application-default set-quota-project <your-google-cloud-project-id>
-```
-
-```dotenv
-LLM_PROVIDER=vertex_ai
-VERTEX_PROJECT_ID=<your-google-cloud-project-id>
-VERTEX_LOCATION=global
-LLM_DECOMPOSITION_MODEL=google/gemini-2.5-flash
-LLM_RATIONALE_MODEL=google/gemini-2.5-flash
-```
-
-Smoke test with Vertex AI and mock calendar:
-
-```bash
-CALENDAR_MODE=mock LLM_PROVIDER=vertex_ai streamlit run src/app.py
-```
-
-OpenAI-compatible example for Groq/OpenRouter-style endpoints:
-
-```dotenv
-LLM_PROVIDER=openai_compatible
-LLM_API_KEY=<provider key>
-LLM_BASE_URL=https://api.groq.com/openai/v1
-LLM_DECOMPOSITION_MODEL=<provider model>
-LLM_RATIONALE_MODEL=<provider model>
-```
-
-## Testing Rules
-
-- Mock LLM calls through `_call_llm`, `_call_anthropic`, or `_post_json`.
-- Mock Google Calendar service calls in tests.
-- Do not require live credentials for unit tests.
-- Keep heuristics and validator pure and easy to unit-test.
-- When adding state fields, update `src/orchestration/state.py` first.
-
-## Debug Trace
-
-During review and done phases, Streamlit shows a "Debug trace" expander. Use it
-to inspect the graph's intermediate outputs without digging through terminal
-logs. The compact report is designed to paste into issues or debugging threads.
-
-Trace currently includes:
-
-- goal decomposition provider/model and subtask summaries
-- busy/free calendar slot counts
-- each heuristic's scheduled and unscheduled counts
-- validation pass/fail and violation counts per strategy
-- rationale generation provider/model and text lengths
-- proposal duplicate detection
-- approval decision and selected strategy
-- calendar write mode and written event count
-
-Prompt and response bodies are intentionally omitted by default.
-
-## Development Priorities
-
-Current high-value work:
-
-1. Run and document the full mock-mode app walkthrough.
-2. Verify Gemini or another low-cost live LLM provider.
-3. Verify live Google Calendar mode or explicitly defer it.
-
-## Safety Checklist
-
-Before committing:
-
-```bash
-.venv/bin/pytest -q
-git status --short
-```
-
-Also check:
-
-- No `.env`, `token.json`, `credentials.json`, OAuth token, or API key is staged.
-- No Google Calendar update/delete operation has been added.
-- Mock mode still works.
-- Any new LLM or Google API path is tested with mocks.
-
-## Reference Docs
-
-- `docs/STATUS.md` -- current project status.
-- `docs/ARCHITECTURE.md` -- system contracts and graph design.
-- `docs/archive/PROJECT_PLAN.md` and `docs/archive/WILL_IMPLEMENTATION_GUIDE.md` -- historical planning/implementation notes.
+- Change Python contracts in `src/domain/models.py` and update `web/src/types.ts` together. FastAPI exposes `/openapi.json`; TypeScript generation is a future improvement.
+- Keep heuristics and validator pure; inject gateways/clocks/decomposers in service tests.
+- Every write path must use the approval service, immutable snapshot identity, and per-event ledger. Never introduce Calendar update/delete calls.
+- Validation violations are surfaced for user judgment. Do not introduce a scheduling repair loop.
+- Update STATUS when actual behavior or verification changes. Historical experiment reports describe the research graph, not the current product call count or UI.

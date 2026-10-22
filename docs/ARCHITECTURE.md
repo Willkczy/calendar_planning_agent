@@ -1,171 +1,73 @@
 # Architecture
 
-This is the stable system-design reference for the Calendar Planning Agent. For changing implementation status, use `docs/STATUS.md`.
+The main product is a local, single-user planning workspace. Current verification and remaining work live in [STATUS.md](STATUS.md); the earlier research design is preserved in `docs/archive/` and the project report.
 
-## Purpose
+## Boundaries
 
-The app takes a natural-language goal, decomposes it into subtasks with Claude, finds free time on the user's calendar, builds three candidate schedules, validates them, shows all candidates to the user, and writes only the approved candidate.
+```mermaid
+flowchart LR
+  React[React / TypeScript] --> API[FastAPI]
+  API --> Service[PlanningService]
+  Streamlit[Streamlit compatibility UI] --> Service
+  Research[Research graph approval adapter] --> Service
+  Service --> DB[(SQLite plans / revisions / write ledger)]
+  Service --> LLM[client.py]
+  Service --> Pure[Pure scheduling and validation]
+  Service --> Calendar[CalendarGateway: read / get / insert]
+  Calendar --> Mock[(Persistent mock events)]
+  Calendar --> Google[Google Calendar]
+```
 
-## Module Map
+`src/domain/models.py` contains validated Pydantic request/storage contracts. Algorithms consume ordinary dictionaries and have no I/O. `src/planning/service.py` owns workflow state changes. `src/planning/store.py` owns persistence and per-plan locks. Frontends never submit an arbitrary event list as an approved schedule.
+
+## State and revisions
 
 ```text
-config/
-  settings.py
-
-src/
-  app.py
-  frontend/
-    intake_form.py
-    schedule_display.py
-    approval_controls.py
-  calendar_api/
-    auth.py
-    events.py
-    free_slots.py
-    mock_calendar.py
-  llm_client/
-    client.py
-  orchestration/
-    state.py
-    graph.py
-    nodes/
-    heuristics/
-  validator/
-    constraints.py
+create → draft → decompose → editable tasks → generate → review
+review → update draft → generate → review
+review → reject → rejected
+review → approve → preflight → needs_review OR writing
+writing → completed OR partial
+partial/writing → retry → reconcile → preflight → continue
 ```
 
-## Graph Flow
+The plan stores its goal, preferences, calendar identity/mode, stable task IDs and DAG, candidates, calendar snapshot, immutable approval identity, and write results. Decomposing, editing, and generating increment the revision. Editing invalidates candidates. A browser can reload a saved stage by `?plan=<id>`; work in progress is synchronous and does not resume automatically after a process dies.
 
-```text
-decompose_goal
-  -> fetch_events
-  -> deadline_first
-  -> min_fragmentation
-  -> energy_aware
-  -> validate_candidates
-  -> generate_rationales
-  -> build_proposal
-  -> human_approval
-  -> write_events or END
-```
+SQLite uses WAL, unique plan/revision and plan/event keys, and POSIX `flock` locks around each plan mutation. Locks are released when a process exits. This coordinates API and Streamlit processes using the same local database. It is not a distributed lock or a lock on an entire external calendar.
 
-The three heuristic branches write separate candidate keys, then `validate_candidates` validates all three. The app presents all candidates; there is no automatic winner and no repair loop.
+## Time and task contracts
 
-## State Contract
+- API preferences contain an IANA timezone and a date-only deadline. Its exclusive boundary is midnight at the start of the following local day.
+- Event timestamps are offset-aware ISO 8601 values. Naive event timestamps are rejected; elapsed duration and interval arithmetic use absolute instants. Local working days, hours, and energy periods use the plan timezone.
+- Tasks have stable IDs, explicit `depends_on`, complexity, and positive duration. Legacy structural tags are translated once at the boundary. Missing prerequisites, duplicate IDs, and cycles fail validation.
+- Each task currently occupies one session. Tasks longer than the configured session limit or with unscheduled prerequisites remain unscheduled; they are not silently split or repaired.
+- A shared pure engine implements earliest-slot, larger-slot, and energy-aware policies. It considers energy-period boundaries as possible starts. These are greedy heuristics, with no optimality guarantee.
+- Validation covers task coverage/identity/dependencies, duration, session length, workdays/hours, breaks, deadline, invalid intervals, existing-event overlap, and self-overlap. Preflight also surfaces uncreated events that are already in the past.
 
-The graph state is defined in `src/orchestration/state.py`.
+Calendar reads interpret all-day events in the calendar timezone, ignore transparent/cancelled/self-declined events, and fail on invalid intervals or read errors. Read errors never mean “calendar is free.”
 
-Core user-input fields:
+## Approval and add-only writes
 
-- `goal: str`
-- `deadline: str`
-- `context: str`
-- `work_start: str`
-- `work_end: str`
-- `max_session_minutes: int`
+1. The request supplies the displayed revision, candidate ID, schedule snapshot hash, and explicit acknowledged violation IDs. Stale or mismatched requests fail.
+2. The service checks the saved calendar mode and ID against the running configuration. Opening a live plan while running in mock mode cannot invoke live writes.
+3. Unknown prior writes are looked up by deterministic provider event ID. Only a response matching the approved title and times is confirmed. Lookup errors stop the operation.
+4. A fresh busy-calendar read excludes confirmed events from this approval. Newly discovered violations produce `needs_review`; the schedule is not automatically changed. Each new issue needs explicit acknowledgement.
+5. The approval is saved before the first insert. Approved tasks and schedules are then locked against edits or switching candidates.
+6. Each event is recorded as `unknown` before any external operation. A matching successful response becomes `confirmed`. An error preserves the unknown state and stops the batch, keeping successful events.
+7. Retry reconciles unknown results first, skips confirmed events, and attempts only missing ones with the same provider IDs. Repeated approval of a completed snapshot returns the saved result.
 
-Calendar and decomposition fields:
+Google IDs are derived from plan/revision/snapshot/event identity using a lowercase hexadecimal SHA-256 digest. There are no update/delete operations and no rollback deletion. This improves idempotency; it does not provide an atomic transaction across SQLite and Google, nor prevent unrelated calendar edits between preflight and insert.
 
-- `busy_blocks: list[dict[str, str]]`
-- `free_slots: list[dict[str, str]]`
-- `subtasks: list[Subtask]`
+## LLM and research modes
 
-Candidate fields:
+The product makes one logical decomposition call through `src/llm_client/client.py` (provider retries remain possible). The response is parsed and validated into the task schema and DAG. Metrics and short explanations are deterministic. Provider-native structured-output schemas are not yet implemented.
 
-- `candidate_deadline_first: list[ProposedEvent]`
-- `candidate_min_fragmentation: list[ProposedEvent]`
-- `candidate_energy_aware: list[ProposedEvent]`
-- `candidate_validations: dict[str, ValidationResult]`
-- `candidate_rationales: dict[str, str]`
-- `candidates_identical: bool`
+The optional `build_graph()` path retains decomposition critique, candidate reviewers, and rationales for research comparisons. It ends after `build_proposal`; there is no claimed LangGraph checkpoint/interrupt. `run_graph_until_approval()` returns that proposal with a stable plan ID. `resume_graph()` is a compatibility helper that records a decision and routes an approved proposal through the shared ledger. It is not durable graph resumption. The research graph's `debug_trace` remains available programmatically.
 
-Approval/write fields:
+## API and UI
 
-- `selected_strategy: str | None`
-- `user_approved: bool | None`
-- `final_schedule: list[ProposedEvent]`
-- `write_results: list[dict[str, Any]]`
+`src/api/app.py` provides config, list/create/get plans, decomposition, draft update, candidate generation, approval, and rejection. Mutations validate requests and return 409 for revision/approval conflicts. Built React assets are served from `web/dist`; Vite proxies API calls during development.
 
-## Key Types
+The React workflow has goal, task, comparison, and confirmation steps. Radix handles the approval dialog. A lazy-loaded FullCalendar React week view uses the Luxon named-timezone plugin; the agenda is the mobile/default view. The React state controls the calendar view, with no iframe or competing stored view. Streamlit consumes the same service with simpler editing and tables.
 
-```python
-class Subtask(TypedDict):
-    name: str
-    description: str
-    duration_minutes: int
-
-class ProposedEvent(TypedDict):
-    name: str
-    description: str
-    start: str
-    end: str
-
-class Violation(TypedDict):
-    event_name: str
-    violation_type: str
-    description: str
-
-class ValidationResult(TypedDict):
-    passed: bool
-    violations: list[Violation]
-```
-
-Datetime values inside dicts are ISO 8601 strings. Working hours are `"HH:MM"` strings in graph state and `datetime.time` values inside pure functions.
-
-## Approval Contract
-
-Current behavior:
-
-1. `run_graph_until_approval(graph, user_inputs)` builds initial state and runs until `human_approval`.
-2. The paused state contains all candidates, validations, rationales, and `candidates_identical`.
-3. In approve flow, `src/app.py` sets `graph_state["selected_strategy"] = strategy_name`.
-4. `resume_graph(graph, graph_state, approved=True)` validates the selected strategy, sets `final_schedule`, and calls `write_events_node`.
-5. Reject flow calls `resume_graph(graph, graph_state, approved=False)` and exits with no writes.
-
-Open design option: refactor `resume_graph` to accept `selected_strategy` explicitly instead of relying on app-owned state mutation.
-
-## Scheduling Strategies
-
-- `deadline_first`: greedy earliest-slot assignment.
-- `min_fragmentation`: largest-slot / longest-task strategy.
-- `energy_aware`: places heavier tasks earlier when possible.
-
-All heuristics must remain pure: no LLM calls, no API calls, no Streamlit calls, and no persistence.
-
-## Validation Rules
-
-`src/validator/constraints.py` checks:
-
-- `OVERLAP`: candidate event overlaps an existing busy block.
-- `SELF_OVERLAP`: candidate events overlap each other.
-- `OUT_OF_HOURS`: event falls outside configured working hours.
-- `DEADLINE_EXCEEDED`: event ends after the deadline.
-
-Validator logic must remain deterministic and pure.
-
-## Calendar Rules
-
-- `CALENDAR_MODE=mock` uses `src/calendar_api/mock_calendar.py`.
-- `CALENDAR_MODE=live` uses Google Calendar wrappers.
-- Writes are add-only. Never call Google Calendar `events().update()` or `events().delete()`.
-- Agent-created live events should include the `[CALENDAR_AGENT]` tag in descriptions.
-
-## LLM Rules
-
-- All LLM calls go through `src/llm_client/client.py`.
-- Supported providers: `anthropic`, `gemini`, `vertex_ai`, `openai_compatible`, and `mock`.
-- Goal decomposition and rationale generation can use separate configured models.
-- Tests must mock provider calls; never make real LLM calls in tests.
-
-## Frontend Flow
-
-`src/app.py` manages phases:
-
-```text
-intake -> running -> review -> done
-```
-
-- `intake`: collect user inputs.
-- `running`: build graph and run to approval.
-- `review`: render candidates and approval/reject controls.
-- `done`: show final result and allow restart.
+The API restricts Host/Origin for local use, but has no authentication, user ownership isolation, or web OAuth callback. Those are prerequisites for a public service. SQLite and its stored plan/calendar data must stay on the user's local machine in this release.

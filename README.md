@@ -1,197 +1,81 @@
-# Calendar Planning Agent
+# 日序 · Calendar Planning Agent
 
-A multi-agent calendar augmentation system that takes a user's
-natural-language goal, decomposes it into subtasks via an LLM,
-finds free time on Google Calendar, builds three heuristic candidate
-schedules, validates them against hard constraints, and writes only
-the user-approved schedule back to the calendar.
+Turn a goal into an editable task draft, compare three schedules, and add only the events you approve. The main workspace uses React + TypeScript with a FastAPI backend. Streamlit remains available through the same planning service.
 
-Add-only by design: the agent never updates or deletes existing
-events.
+![Guided planning workspace](docs/review-assets/refactored-workspace.png)
 
-## Highlights
+## Run locally
 
-- **Multi-agent planning loop** — decomposition critic + per-candidate
-  reviewers refine LLM output before users see it.
-- **Three heuristic strategies** — `deadline_first`,
-  `min_fragmentation`, and `energy_aware` — surfaced side by side so
-  the user picks, not the agent.
-- **Pluggable LLM providers** — Anthropic, Gemini, Vertex AI,
-  any OpenAI-compatible endpoint, plus a deterministic mock for
-  fully offline runs.
-- **Three-tier test suite** — programmatic units, pipeline-level
-  integration with mocked LLM, and real-LLM integration tests
-  that hit Vertex AI.
-- **Mock-first** — `CALENDAR_MODE=mock LLM_PROVIDER=mock` runs the
-  full UX without any cloud credentials.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    A[intake form] --> B(decompose_goal)
-    B --> C{decomposition_critic}
-    C -- needs revision --> B
-    C -- ok --> D(fetch_events)
-    D --> E1(deadline_first)
-    D --> E2(min_fragmentation)
-    D --> E3(energy_aware)
-    E1 & E2 & E3 --> F(validate_candidates)
-    F --> G(review_candidates)
-    G --> H(generate_rationales)
-    H --> I(build_proposal)
-    I --> J{human_approval}
-    J -- approve --> K(write_events)
-    J -- reject --> Z[END]
-```
-
-| Module | Location | Purpose |
-|---|---|---|
-| Frontend | `src/frontend/` | Streamlit UI: intake form, FullCalendar review, approval controls |
-| Calendar API | `src/calendar_api/` | Google Calendar OAuth, free-slot computation, mock calendar |
-| Orchestration | `src/orchestration/` | LangGraph nodes, multi-agent review, three pure heuristics |
-| Validator | `src/validator/` | Deterministic OVERLAP / OUT_OF_HOURS / DEADLINE_EXCEEDED checks |
-| LLM Client | `src/llm_client/` | Provider-agnostic JSON / text wrapper with retry + truncation handling |
-
-For the deeper contract see `docs/ARCHITECTURE.md`.
-
-## Quick Start
+Requires Python 3.11+ and Node.js 22.12+ (CI uses Node 24). Run these commands from the repository root:
 
 ```bash
-# 1. Clone and enter the project
-cd calendar_planning_agent
-
-# 2. Create a virtual environment
-python -m venv .venv && source .venv/bin/activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Copy env template (no real keys required for mock mode)
-cp .env.example .env
-
-# 5. Run fully offline with mock calendar + mock LLM
-CALENDAR_MODE=mock LLM_PROVIDER=mock streamlit run src/app.py
-
-# 6. Run the fast no-credentials suite
-CALENDAR_MODE=mock LLM_PROVIDER=mock .venv/bin/pytest -q tests/programmatic/
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+npm --prefix web ci
+npm --prefix web run build
+CALENDAR_MODE=mock LLM_PROVIDER=mock .venv/bin/python -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000
 ```
 
-## Usage Demo
+Open [the workspace](http://127.0.0.1:8000). Both mock settings are required for a walkthrough without Google credentials or hosted LLM calls. Mock decomposition uses clearly labeled example tasks; edit them to fit your goal.
 
-The repo ships a fixture ICS file with a busy week in May 2026:
+Plans, revisions, approvals, write results, and mock events persist in `.data/planner.sqlite3`. Set `PLANNER_DB_PATH` to use a different database. Refreshing or restarting keeps saved plans. Unsubmitted form edits are not saved automatically.
+
+This version is a **local, single-user application on macOS/Linux**. The API has no user authentication and the SQLite writer uses POSIX file locks. Keep it bound to localhost. Public or multi-user deployment requires authentication, per-user OAuth/storage, and a different deployment design.
+
+## What changed
+
+- **Guided workflow:** describe a goal → edit tasks and dependencies → compare schedules → review an explicit approval summary. Mobile uses an agenda; desktop can switch to a timezone-aware week calendar.
+- **Shared backend:** Pydantic contracts and one application service power React, Streamlit, and the research graph's write adapter.
+- **Correctness:** stable task IDs, dependency validation, coverage and duration checks, working days, breaks, local deadline boundaries, and daylight-saving handling.
+- **Recoverable writes:** approval binds a revision and schedule hash. A fresh calendar check surfaces new conflicts. Stable event IDs and a persistent ledger allow retries to reconcile uncertain results and skip confirmed writes.
+- **Lower LLM overhead:** the workspace uses one logical decomposition call, with provider retries if needed. Comparison metrics and explanations come from scheduling rules. The original multi-reviewer graph remains available for research.
+
+Calendar operations remain add-only. A Google insert and a local database transaction cannot form one atomic transaction; external calendar changes can still race the final check. A partial write preserves successful events and never deletes them to roll back.
+
+## Development and testing
+
+For hot reload, run the API with `--reload`, then start Vite in another terminal:
 
 ```bash
-# Show the busy blocks the mock calendar will load
-cat demo_busy_blocks_may_2026.ics
+npm --prefix web run dev
 ```
 
-In mock mode the app reads from `src/calendar_api/mock_calendar.py`
-and the demo ICS is a human-readable mirror of those blocks. Submit
-a goal such as:
-
-```text
-Goal:    Finish the multi-agent paper draft
-Deadline: 2026-05-20T17:00
-Context: Need 3 deep-work sessions plus 1 review session
-```
-
-The agent produces three candidate schedules. Approve one to
-"write" the events (mock mode prints the writes; live mode hits
-Google Calendar).
-
-### Screenshots
-
-A complete walkthrough captured against the mock calendar with
-real Vertex AI for decomposition / rationale generation. Full set
-in [docs/screenshots/](docs/screenshots/).
-
-#### 1. Intake form
-Goal, deadline, working hours, max session length, configurable
-inter-task break, and per-period energy levels.
-
-![Intake form](docs/screenshots/01-intake-form.png)
-
-#### 2. Three candidate schedules side by side
-
-The agent generates three candidates in parallel and lets the user
-pick. Existing busy blocks render gray; agent proposals render in
-the strategy's color.
-
-| Strategy | Goal | Color |
-|----------|------|-------|
-| Finish Earliest | Maximise buffer before deadline | blue |
-| Keep Time Contiguous | Fill largest slots first to minimise context-switching | green |
-| Energy-Aware | Heavy work in high-energy periods | orange |
-
-![Finish Earliest](docs/screenshots/02-strategy-finish-earliest.png)
-![Keep Time Contiguous](docs/screenshots/03-strategy-keep-time-contiguous.png)
-![Energy-Aware](docs/screenshots/04-strategy-energy-aware.png)
-
-Each strategy shows: rationale, agent reviews (multi-agent critic
-output), task breakdown table, and a FullCalendar week view.
-
-#### 3. Approval confirmation
-After the user approves a strategy, the app writes the calendar
-events and shows the debug trace.
-
-![Approval confirmation](docs/screenshots/05-approval-confirmation.png)
-
-#### 4. Live Google Calendar after write
-End-to-end verification: agent-tagged events appear in the user's
-real Google Calendar alongside the existing busy blocks.
-
-![Google Calendar after write](docs/screenshots/06-google-calendar-live.png)
-
-## Tests
-
-Three suites, picked deliberately for the rubric:
-
-| Suite | Path | Tests | LLM | Credentials | Wall-clock |
-|-------|------|-------|-----|-------------|------------|
-| Programmatic unit | `tests/programmatic/` | 118 | Mocked | None | < 1 s |
-| Pipeline unit | `tests/pipeline_unit/` | 100 | **Real Vertex AI** (skips when `LLM_PROVIDER=mock`) | Google ADC | ~3–4 min |
-| LLM integration | `tests/llm_integration/` | 99 | Real Vertex AI (`-m integration`) | Google ADC | ~110 s |
-
-`tests/pipeline_unit/` calls the real LLM despite the name — its
-conftest auto-skips when `LLM_PROVIDER=mock`. Use it only when ADC
-credentials are available; otherwise stick to the programmatic suite.
+Vite serves [localhost:5173](http://127.0.0.1:5173) and proxies `/api` to port 8000. For the Streamlit compatibility interface:
 
 ```bash
-# Inner CI loop — no credentials, ~1 s
-CALENDAR_MODE=mock LLM_PROVIDER=mock .venv/bin/pytest -q tests/programmatic/
-
-# Full real-LLM verification — needs Google ADC
-CALENDAR_MODE=mock LLM_PROVIDER=vertex_ai .venv/bin/pytest -q tests/pipeline_unit/
-CALENDAR_MODE=mock LLM_PROVIDER=vertex_ai .venv/bin/pytest -v -m integration tests/llm_integration/
+CALENDAR_MODE=mock LLM_PROVIDER=mock .venv/bin/python -m streamlit run src/app.py
 ```
 
-See `docs/EXPERIMENTAL_SETUP.md` for the exact commands and
-`docs/REPRODUCIBILITY.md` for determinism rules.
+Offline verification:
 
-## Project Report
+```bash
+CALENDAR_MODE=mock LLM_PROVIDER=mock .venv/bin/pytest tests/ -q --ignore=tests/llm_integration
+npm --prefix web run build
+```
 
-The full write-up of the project — motivation, multi-agent design,
-heuristic comparison, evaluation, and lessons learned — is in
-[GenAI_Report_Final.pdf](GenAI_Report_Final.pdf).
+Browser tests and optional live evaluations are documented in [the developer guide](docs/DEVELOPER_GUIDE.md). Read [STATUS.md](docs/STATUS.md) for actual verification results and remaining work; mock results do not establish live provider quality or behavior.
 
-## Documentation
+## Code map
 
-- [GenAI_Report_Final.pdf](GenAI_Report_Final.pdf) — full project report.
-- [docs/STATUS.md](docs/STATUS.md) — current progress, gaps, and next actions.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — graph, state, and module contracts.
-- [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) — day-to-day setup, env vars, smoke tests.
-- [docs/EXPERIMENTAL_SETUP.md](docs/EXPERIMENTAL_SETUP.md) — how each test tier is run.
-- [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) — determinism, seeds, version pinning.
-- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — token budgets, retries, complexity notes.
-- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common failures and fixes.
+| Area | Location |
+|---|---|
+| React workspace | `web/src/` |
+| REST API | `src/api/app.py` |
+| Validated contracts and time semantics | `src/domain/` |
+| Planning workflow, storage, calendar gateway | `src/planning/` |
+| Pure scheduling strategies | `src/orchestration/heuristics/` |
+| Deterministic constraint validation | `src/validator/constraints.py` |
+| Google Calendar read/insert adapters | `src/calendar_api/` |
+| All provider calls | `src/llm_client/client.py` |
+| Streamlit compatibility entry | `src/app.py` |
+| Optional multi-reviewer research graph | `src/orchestration/graph.py` |
 
-## Hard Rules
+## References
 
-- Calendar writes are **add-only** — `events().update()` and
-  `events().delete()` are never called.
-- No secrets are committed (`.env`, `token.json`,
-  `credentials.json`, service-account JSON, or API keys).
-- Heuristics and validator stay pure: no LLM calls, no API calls,
-  no side effects.
-- All LLM traffic flows through `src/llm_client/client.py`.
+- [Current status and remaining work](docs/STATUS.md)
+- [Architecture and approval contract](docs/ARCHITECTURE.md)
+- [Setup, local workflow, and testing](docs/DEVELOPER_GUIDE.md)
+- [Original refactor and UX audit](docs/REFACTOR_UX_REVIEW.md)
+- [Historical research report](GenAI_Report_Final.pdf) and [experiment setup](docs/EXPERIMENTAL_SETUP.md)
+
+Never commit `.env`, OAuth tokens, credentials, or API keys. All LLM calls go through `client.py`; heuristics and validation remain pure Python. Validation issues are shown for explicit user judgment, with no automatic repair loop.

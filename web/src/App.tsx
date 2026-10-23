@@ -88,13 +88,17 @@ export default function App() {
     try {
       await action();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "操作未完成，請重試。");
+      setError(
+        e instanceof Error
+          ? e.message
+          : "The operation could not be completed. Please try again.",
+      );
     } finally {
       setBusy("");
     }
   }
   async function initialize() {
-    await run("正在讀取工作區…", async () => {
+    await run("Loading your workspace…", async () => {
       const [c, list] = await Promise.all([
         api<Config>("/config"),
         api<PlanSummary[]>("/plans"),
@@ -124,7 +128,7 @@ export default function App() {
     window.history.replaceState(null, "", window.location.pathname);
   }
   async function create() {
-    await run("正在拆解目標，整理可編輯的任務…", async () => {
+    await run("Breaking your goal into editable tasks…", async () => {
       const created = await api<Plan>("/plans", { goal, context, preferences });
       applyPlan(created);
       applyPlan(
@@ -136,32 +140,38 @@ export default function App() {
   }
   async function generate() {
     if (!plan) return;
-    await run("正在讀取可用時間、建立方案並檢查限制…", async () => {
-      const saved = await api<Plan>(
-        `/plans/${plan.id}/draft`,
-        { revision: plan.revision, tasks, preferences },
-        "PUT",
-      );
-      applyPlan(saved);
-      applyPlan(
-        await api<Plan>(`/plans/${saved.id}/generate`, {
-          revision: saved.revision,
-        }),
-      );
-    });
+    await run(
+      "Finding free time, building schedules, and checking constraints…",
+      async () => {
+        const saved = await api<Plan>(
+          `/plans/${plan.id}/draft`,
+          { revision: plan.revision, tasks, preferences },
+          "PUT",
+        );
+        applyPlan(saved);
+        applyPlan(
+          await api<Plan>(`/plans/${saved.id}/generate`, {
+            revision: saved.revision,
+          }),
+        );
+      },
+    );
   }
   async function approve(candidate: Candidate, ids: string[]) {
     if (!plan) return;
-    await run("正在核對日曆並記錄每筆新增結果…", async () => {
-      const result = await api<Plan>(`/plans/${plan.id}/approve`, {
-        revision: plan.revision,
-        candidate_id: candidate.id,
-        snapshot_hash: candidate.snapshot_hash,
-        acknowledged_violation_ids: ids,
-      });
-      applyPlan(result);
-      setSelected(candidate.id);
-    });
+    await run(
+      "Checking your calendar and saving each event result…",
+      async () => {
+        const result = await api<Plan>(`/plans/${plan.id}/approve`, {
+          revision: plan.revision,
+          candidate_id: candidate.id,
+          snapshot_hash: candidate.snapshot_hash,
+          acknowledged_violation_ids: ids,
+        });
+        applyPlan(result);
+        setSelected(candidate.id);
+      },
+    );
   }
 
   const candidate = plan?.candidates.find((c) => c.id === selected);
@@ -203,24 +213,24 @@ export default function App() {
             <Layers3 size={22} />
           </span>
           <span>
-            日序<small>CALENDAR PLANNING</small>
+            Calendar<small>PLANNING AGENT</small>
           </span>
         </a>
         <button className="button new-plan" onClick={newPlan} disabled={!!busy}>
           <Plus size={18} />
-          新的規劃
+          New plan
         </button>
         <div className="sidebar-label">
-          你的計畫 <span>{history.length}</span>
+          Your plans <span>{history.length}</span>
         </div>
-        <nav className="plan-history" aria-label="已保存的計畫">
+        <nav className="plan-history" aria-label="Saved plans">
           {history.map((item) => (
             <button
               key={item.id}
               className={item.id === plan?.id ? "active" : ""}
               disabled={!!busy}
               onClick={() =>
-                void run("正在讀取計畫…", async () =>
+                void run("Loading your plan…", async () =>
                   applyPlan(await api<Plan>(`/plans/${item.id}`)),
                 )
               }
@@ -240,31 +250,31 @@ export default function App() {
           ))}
           {!history.length && (
             <p className="history-empty">
-              把下一個想完成的目標
+              Start with your next goal.
               <br />
-              留一點時間給它。
+              Make a little time for it.
             </p>
           )}
         </nav>
         <div className="sidebar-footer">
           <Leaf size={18} />
           <span>
-            給重要的事，留出空間。<small>計畫自動保存於此電腦</small>
+            Make room for what matters.<small>Plans saved on this device</small>
           </span>
         </div>
       </aside>
       <main className="main">
         <header className="topbar">
           <span className="breadcrumb">
-            工作區 <span>/</span> {plan ? "我的規劃" : "開始新的規劃"}
+            Workspace <span>/</span> {plan ? "My plan" : "Start a new plan"}
           </span>
           <div className="connection">
             <i className={config ? "status-dot done" : "status-dot"} />
             {(plan?.calendar_mode || config?.calendar_mode) === "mock"
-              ? "示範模式"
+              ? "Demo mode"
               : config
-                ? "Google Calendar · 本機"
-                : "連線中"}
+                ? "Google Calendar · Local"
+                : "Connecting"}
             <span className="connection-zone">
               {plan?.preferences.timezone || config?.timezone}
             </span>
@@ -273,19 +283,19 @@ export default function App() {
         {!!history.length && (
           <div className="mobile-history mobile-only">
             <label>
-              開啟已保存的計畫
+              Open a saved plan
               <select
                 value={plan?.id || ""}
                 disabled={!!busy}
                 onChange={(e) => {
                   const id = e.target.value;
                   if (id)
-                    void run("正在讀取計畫…", async () =>
+                    void run("Loading your plan…", async () =>
                       applyPlan(await api<Plan>(`/plans/${id}`)),
                     );
                 }}
               >
-                <option value="">選擇計畫</option>
+                <option value="">Choose a plan</option>
                 {history.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.goal} · {statusNames[item.status]}
@@ -296,48 +306,42 @@ export default function App() {
           </div>
         )}
         <div className="page">
-          <ol className="steps" aria-label="規劃步驟">
-            {["描述目標", "確認任務", "比較方案", "確認新增"].map(
-              (label, i) => (
-                <li
-                  key={label}
-                  aria-current={stage === i + 1 ? "step" : undefined}
-                  className={
-                    stage > i + 1
-                      ? "complete"
-                      : stage === i + 1
-                        ? "current"
-                        : ""
-                  }
-                >
-                  <span>{stage > i + 1 ? <Check size={13} /> : i + 1}</span>
-                  {label}
-                </li>
-              ),
-            )}
+          <ol className="steps" aria-label="Planning steps">
+            {["Goal", "Tasks", "Compare", "Confirm"].map((label, i) => (
+              <li
+                key={label}
+                aria-current={stage === i + 1 ? "step" : undefined}
+                className={
+                  stage > i + 1 ? "complete" : stage === i + 1 ? "current" : ""
+                }
+              >
+                <span>{stage > i + 1 ? <Check size={13} /> : i + 1}</span>
+                {label}
+              </li>
+            ))}
           </ol>
           {error && (
             <div className="error-banner" role="alert">
               <CircleAlert size={20} />
               <div>
-                <strong>這次操作未完成</strong>
+                <strong>We could not complete this step</strong>
                 <p>{error}</p>
                 <button
                   disabled={!!busy}
                   onClick={() =>
                     void (plan
-                      ? run("重新讀取計畫…", async () =>
+                      ? run("Reloading your plan…", async () =>
                           applyPlan(await api<Plan>(`/plans/${plan.id}`)),
                         )
                       : initialize())
                   }
                 >
-                  重新讀取已保存的內容
+                  Reload saved plan
                 </button>
               </div>
               <button
                 className="icon-button"
-                aria-label="關閉錯誤訊息"
+                aria-label="Dismiss error"
                 onClick={() => setError("")}
               >
                 ×
@@ -348,7 +352,7 @@ export default function App() {
             <div className="progress-banner" role="status">
               <LoaderCircle className="spin" size={18} />
               {busy}
-              <span>你已保存的內容會保留</span>
+              <span>Your saved plan is safe</span>
             </div>
           )}
 
@@ -358,14 +362,14 @@ export default function App() {
                 <div className="page-heading">
                   <span className="eyebrow">MAKE ROOM FOR WHAT MATTERS</span>
                   <h1>
-                    讓目標，
+                    Make time for
                     <br />
-                    找到時間。
+                    your goals.
                   </h1>
                   <p>
-                    從一件想完成的事開始。一起拆解步驟，
+                    Start with something you want to accomplish.
                     <br className="desktop-only" />
-                    找到適合你的安排。
+                    Break it into steps and find a schedule that fits.
                   </p>
                 </div>
                 <form
@@ -379,7 +383,7 @@ export default function App() {
                     className="form-fields"
                   >
                     <label className="goal-label">
-                      你想完成什麼？
+                      What do you want to accomplish?
                       <textarea
                         className="goal-input"
                         required
@@ -388,20 +392,22 @@ export default function App() {
                         rows={3}
                         value={goal}
                         onChange={(e) => setGoal(e.target.value)}
-                        placeholder="例如：兩週內完成個人作品集，整理三個代表作並上線。"
+                        placeholder="For example: build a portfolio with three projects and publish it in two weeks."
                       />
                     </label>
                     <div className="examples">
-                      <span>試試看</span>
+                      <span>Try a goal</span>
                       {[
-                        "完成個人作品集",
-                        "準備一場 20 分鐘演講",
-                        "學會 Python 基礎",
+                        "Build a portfolio",
+                        "Prepare a 20-minute talk",
+                        "Learn Python basics",
                       ].map((example) => (
                         <button
                           type="button"
                           key={example}
-                          onClick={() => setGoal(`在兩週內${example}。`)}
+                          onClick={() =>
+                            setGoal(`${example} in the next two weeks.`)
+                          }
                         >
                           {example}
                           <Plus size={12} />
@@ -413,21 +419,22 @@ export default function App() {
                       change={setPreferences}
                     />
                     <label>
-                      補充背景 <span className="optional">選填</span>
+                      Additional context{" "}
+                      <span className="optional">Optional</span>
                       <textarea
                         rows={2}
                         value={context}
                         onChange={(e) => setContext(e.target.value)}
-                        placeholder="目前的進度、已具備的能力，或需要特別考慮的事…"
+                        placeholder="Your progress so far, relevant experience, or anything to keep in mind…"
                       />
                     </label>
                     <div className="form-footer">
                       <p>
                         <CheckCircle2 size={15} />
-                        選定方案並確認後，才會新增事件。
+                        Events are added only after you review and confirm.
                       </p>
                       <button className="button primary" type="submit">
-                        拆解我的目標 <ArrowRight size={17} />
+                        Break down my goal <ArrowRight size={17} />
                       </button>
                     </div>
                   </fieldset>
@@ -439,32 +446,33 @@ export default function App() {
                 </span>
                 <span className="eyebrow">A LITTLE STRUCTURE, MORE SPACE</span>
                 <h2>
-                  好的安排，
+                  A little structure.
                   <br />
-                  也留得下生活。
+                  More room for life.
                 </h2>
                 <p>
-                  把模糊的目標拆成可執行的小步驟，讓進度與你的時間、精力一起前進。
+                  Turn a broad goal into practical steps that work with your
+                  time and energy.
                 </p>
                 <div className="mini-schedule">
                   <div>
                     <span>09:00</span>
                     <i />
-                    專注一件重要的事
+                    Focus on what matters
                   </div>
                   <div className="mini-break">
                     <span>10:00</span>
                     <i />
-                    休息一下
+                    Take a break
                   </div>
                   <div>
                     <span>10:15</span>
                     <i />
-                    再往前一步
+                    Take the next step
                   </div>
                 </div>
                 <div className="note-footer">
-                  三種安排 · 自由選擇 · 由你確認
+                  Three options · Your choice · Your approval
                 </div>
               </aside>
             </div>
@@ -483,20 +491,20 @@ export default function App() {
                   </span>
                   <h1>
                     {taskView
-                      ? "先把步驟，調整成你的樣子。"
+                      ? "Make the plan your own."
                       : closed
                         ? plan.status === "completed"
-                          ? "時間已留好，開始吧。"
+                          ? "Your time is set. Make it count."
                           : plan.status === "rejected"
-                            ? "這份計畫已結束。"
-                            : "接續完成你的安排。"
-                        : "選一個適合你的節奏。"}
+                            ? "This plan is closed."
+                            : "Pick up where you left off."
+                        : "Find a rhythm that fits."}
                   </h1>
                   <p className="plan-goal">{plan.goal}</p>
                 </div>
                 <span className="saved-badge">
                   <CheckCircle2 size={14} />
-                  {dirty ? "有未儲存的修改" : `已保存 · v${plan.revision}`}
+                  {dirty ? "Unsaved changes" : `Saved · v${plan.revision}`}
                 </span>
               </div>
               {taskView && (
@@ -511,13 +519,17 @@ export default function App() {
                       <div>
                         <div className="section-caption">
                           <h2>
-                            任務清單 <span>{tasks.length}</span>
+                            Your tasks <span>{tasks.length}</span>
                           </h2>
-                          <p>修改名稱、估時與前置任務。完成後再建立方案。</p>
+                          <p>
+                            Edit task names, estimates, and prerequisites before
+                            building schedules.
+                          </p>
                         </div>
                         {config?.llm_provider === "mock" && (
                           <p className="mock-note">
-                            目前使用固定的示範任務，請依照目標調整內容。
+                            These are example tasks. Adjust them to fit your
+                            goal.
                           </p>
                         )}
                         <TaskEditor
@@ -528,13 +540,15 @@ export default function App() {
                         {!tasks.length && (
                           <div className="empty-state">
                             <Sparkles />
-                            <h3>目標已保存</h3>
-                            <p>繼續拆解，產生可以編輯的任務清單。</p>
+                            <h3>Your goal is saved</h3>
+                            <p>
+                              Continue to turn it into an editable task list.
+                            </p>
                             <button
                               className="button primary"
                               type="button"
                               onClick={() =>
-                                void run("正在拆解目標…", async () =>
+                                void run("Breaking down your goal…", async () =>
                                   applyPlan(
                                     await api<Plan>(
                                       `/plans/${plan.id}/decompose`,
@@ -544,35 +558,38 @@ export default function App() {
                                 )
                               }
                             >
-                              繼續拆解目標
+                              Continue task breakdown
                             </button>
                           </div>
                         )}
                       </div>
                       <aside className="editor-aside panel">
                         <span className="eyebrow">PLAN SETTINGS</span>
-                        <h2>為目標留多少時間？</h2>
+                        <h2>Make space for your goal</h2>
                         <div className="time-total">
                           <strong>
                             {minutes(
                               tasks.reduce((n, t) => n + t.duration_minutes, 0),
                             )}
                           </strong>
-                          <span>預計專注時間 · {tasks.length} 項任務</span>
+                          <span>
+                            Estimated focus time · {tasks.length} tasks
+                          </span>
                         </div>
                         <PreferencesFields
                           value={preferences}
                           change={setPreferences}
                         />
                         <p className="small muted">
-                          估時是起點。產生方案後，仍可回來調整。
+                          Estimates are a starting point. You can return to
+                          adjust them.
                         </p>
                       </aside>
                     </div>
                     <div className="action-bar">
                       <p>
                         <Clock3 size={16} />
-                        修改並保存後，會建立新版本。
+                        Saving your changes creates a new version.
                       </p>
                       <div>
                         {editing && (
@@ -585,7 +602,7 @@ export default function App() {
                               setPreferences(plan.preferences);
                             }}
                           >
-                            取消修改
+                            Cancel edits
                           </button>
                         )}
                         <button
@@ -593,7 +610,7 @@ export default function App() {
                           type="submit"
                           disabled={!tasks.length}
                         >
-                          儲存並建立方案 <ArrowRight size={17} />
+                          Save and build schedules <ArrowRight size={17} />
                         </button>
                       </div>
                     </div>
@@ -607,28 +624,34 @@ export default function App() {
                     <div className="warning-banner" role="alert">
                       <CircleAlert size={20} />
                       <div>
-                        <strong>日曆有新的變化，需要重新檢視。</strong>
+                        <strong>
+                          Your calendar has changed. Please review again.
+                        </strong>
                         <p>
-                          已保存最新檢查結果。請調整計畫，或在摘要中逐項確認限制後再繼續。
+                          The latest check is saved. Edit your plan or
+                          acknowledge each issue in the summary to continue.
                         </p>
                       </div>
                     </div>
                   )}
                   {identical && (
                     <p className="info-note">
-                      目前的任務依賴與可用時段，讓三種策略得到相同安排。
+                      The current prerequisites and free time lead all three
+                      strategies to the same schedule.
                     </p>
                   )}
                   <div className="review-layout">
                     <div className="candidate-column">
                       <div className="section-caption">
-                        <h2>比較三種安排</h2>
-                        <p>時間表會隨選擇更新，方便比較不同安排。</p>
+                        <h2>Compare your options</h2>
+                        <p>
+                          Select an option to see how your schedule changes.
+                        </p>
                       </div>
                       <div
                         className="candidate-list"
                         role="group"
-                        aria-label="選擇排程方案"
+                        aria-label="Choose a schedule"
                       >
                         {plan.candidates.map((c, i) => {
                           const Icon = icons[c.id];
@@ -650,7 +673,7 @@ export default function App() {
                                   <Icon size={21} />
                                 </span>
                                 <div>
-                                  <small>方案 0{i + 1}</small>
+                                  <small>OPTION 0{i + 1}</small>
                                   <h3>{strategyNames[c.id]}</h3>
                                 </div>
                                 <span className="radio-indicator">
@@ -664,11 +687,14 @@ export default function App() {
                                     {c.metrics.scheduled_tasks}/
                                     {c.metrics.total_tasks}
                                   </strong>
-                                  任務排入
+                                  Tasks scheduled
                                 </span>
                                 <span>
-                                  <strong>{c.metrics.workdays} 天</strong>
-                                  工作分布
+                                  <strong>
+                                    {c.metrics.workdays}{" "}
+                                    {c.metrics.workdays === 1 ? "day" : "days"}
+                                  </strong>
+                                  Work spread
                                 </span>
                                 <span>
                                   <strong>
@@ -676,7 +702,7 @@ export default function App() {
                                       ? "—"
                                       : `${c.metrics.energy_alignment}%`}
                                   </strong>
-                                  精力配合
+                                  Energy fit
                                 </span>
                               </div>
                               <div
@@ -689,13 +715,13 @@ export default function App() {
                                     <CircleAlert size={14} />
                                   )}{" "}
                                   {c.validation.passed
-                                    ? "檢查通過"
-                                    : `${c.validation.violations.length} 項待確認`}
+                                    ? "Checks passed"
+                                    : `${c.validation.violations.length} to review`}
                                 </span>
                                 <span>
                                   {c.metrics.finishes_at
-                                    ? `${dateLabel(c.metrics.finishes_at, plan.preferences.timezone)}完成`
-                                    : "尚無安排"}
+                                    ? `Done ${dateLabel(c.metrics.finishes_at, plan.preferences.timezone)}`
+                                    : "No events scheduled"}
                                 </span>
                               </div>
                             </button>
@@ -703,7 +729,8 @@ export default function App() {
                         })}
                       </div>
                       <p className="rules-note">
-                        指標由實際排程計算。精力配合依任務強度與時段偏好加權，並非模型評分。
+                        Metrics come from the schedule. Energy fit weighs task
+                        intensity against your preferences.
                       </p>
                     </div>
                     <SchedulePreview plan={plan} candidate={candidate} />
@@ -711,8 +738,7 @@ export default function App() {
                   {!!candidate.validation.violations.length && (
                     <div className="issues panel">
                       <h2>
-                        <CircleAlert size={20} />
-                        有幾件事需要留意
+                        <CircleAlert size={20} />A few things to review
                       </h2>
                       {candidate.validation.violations.map((v) => (
                         <div key={v.id}>
@@ -725,10 +751,10 @@ export default function App() {
                   <div className="action-bar">
                     <div className="action-summary">
                       <span>
-                        已選擇 <strong>{strategyNames[candidate.id]}</strong>
+                        Selected <strong>{strategyNames[candidate.id]}</strong>
                       </span>
                       <small>
-                        {candidate.events.length} 個事件 ·{" "}
+                        {candidate.events.length} events ·{" "}
                         {minutes(candidate.metrics.scheduled_minutes)}
                       </small>
                     </div>
@@ -739,7 +765,7 @@ export default function App() {
                             className="text-button"
                             disabled={!!busy}
                             onClick={() =>
-                              void run("正在結束計畫…", async () =>
+                              void run("Closing your plan…", async () =>
                                 applyPlan(
                                   await api<Plan>(`/plans/${plan.id}/reject`, {
                                     revision: plan.revision,
@@ -748,7 +774,7 @@ export default function App() {
                               )
                             }
                           >
-                            不採用
+                            Reject plan
                           </button>
                           <button
                             className="button secondary"
@@ -756,7 +782,7 @@ export default function App() {
                             onClick={() => setEditing(true)}
                           >
                             <ArrowLeft size={16} />
-                            調整任務
+                            Edit tasks
                           </button>
                         </>
                       )}
@@ -787,19 +813,19 @@ export default function App() {
                   </div>
                   <h2>
                     {plan.status === "completed"
-                      ? `已新增 ${plan.write_results.length} 個事件`
+                      ? `${plan.write_results.length} events added`
                       : plan.status === "rejected"
-                        ? "沒有新增任何日曆事件"
-                        : "已保存每一筆寫入進度"}
+                        ? "No calendar events were added"
+                        : "Your event progress is saved"}
                   </h2>
                   <p>
                     {plan.status === "completed"
                       ? plan.calendar_mode === "mock"
-                        ? "已儲存到本機示範日曆，Google Calendar 沒有變更。"
-                        : `已新增至 ${plan.calendar_id}。`
+                        ? "Saved to your local demo calendar. Google Calendar has not changed."
+                        : `Added to ${plan.calendar_id}.`
                       : plan.status === "rejected"
-                        ? "可以保留這份紀錄，或從新的目標開始。"
-                        : "重試時會先核對日曆，只補建尚未完成的事件。"}
+                        ? "Keep this record or start with a new goal."
+                        : "Retry checks the calendar first and adds only the missing events."}
                   </p>
                   <div className="result-list">
                     {plan.status !== "rejected" &&
@@ -819,17 +845,17 @@ export default function App() {
                             </span>
                             <span>
                               {result?.status === "confirmed"
-                                ? "已確認新增"
+                                ? "Added and confirmed"
                                 : result?.status === "unknown"
-                                  ? "待核對"
-                                  : "尚未寫入"}
+                                  ? "Awaiting verification"
+                                  : "Not yet added"}
                               {result?.response?.htmlLink && (
                                 <a
                                   href={result.response.htmlLink}
                                   target="_blank"
                                   rel="noreferrer"
                                 >
-                                  開啟日曆 ↗
+                                  Open calendar ↗
                                 </a>
                               )}
                             </span>
@@ -851,7 +877,7 @@ export default function App() {
                           }
                         >
                           <RotateCcw size={17} />
-                          核對並繼續新增
+                          Verify and continue
                         </button>
                       )}
                     <button
@@ -860,7 +886,7 @@ export default function App() {
                       disabled={!!busy}
                     >
                       <Plus size={17} />
-                      開始新的規劃
+                      Start a new plan
                     </button>
                   </div>
                 </section>
@@ -868,11 +894,11 @@ export default function App() {
             </>
           )}
           <footer className="page-footer">
-            <span>日序 · 一步一步，把想法放進生活。</span>
+            <span>Calendar Planning Agent · Make time for your goals.</span>
             <span>
               {config?.calendar_mode === "mock"
-                ? "示範日曆 · 不會寫入 Google Calendar"
-                : "本機工作區 · 只新增已確認的事件"}
+                ? "Demo calendar · No changes to Google Calendar"
+                : "Local workspace · Only approved events are added"}
             </span>
           </footer>
         </div>

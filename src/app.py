@@ -54,13 +54,13 @@ def _format_planning_error(exc: Exception) -> str:
 
 
 def main():
-    st.set_page_config(page_title="日序 · Calendar Planning", layout="wide")
-    st.title("日序 · Calendar Planning")
+    st.set_page_config(page_title="Calendar Planning Agent", layout="wide")
+    st.title("Calendar Planning Agent")
     st.caption(
-        f"{'示範日曆' if settings.CALENDAR_MODE == 'mock' else settings.GOOGLE_CALENDAR_ID} · {settings.APP_TIMEZONE} · 計畫儲存於本機"
+        f"{'Demo calendar' if settings.CALENDAR_MODE == 'mock' else settings.GOOGLE_CALENDAR_ID} · {settings.APP_TIMEZONE} · Plans saved locally"
     )
     service = get_service()
-    if st.sidebar.button("新的規劃"):
+    if st.sidebar.button("New plan"):
         st.query_params.clear()
         st.session_state.pop("edit_plan", None)
         st.rerun()
@@ -91,33 +91,35 @@ def main():
                     )
                 )
                 st.query_params["plan"] = plan.id
-                with st.spinner("正在拆解目標…"):
+                with st.spinner("Breaking down your goal…"):
                     service.decompose(plan.id, plan.revision)
                 st.rerun()
             return
         plan = service.get(plan_id)
         st.subheader(plan.goal)
-        st.caption(f"已保存 · v{plan.revision} · {plan.preferences.timezone}")
+        st.caption(f"Saved · v{plan.revision} · {plan.preferences.timezone}")
         if not plan.tasks:
-            if st.button("繼續拆解目標"):
+            if st.button("Continue task breakdown"):
                 service.decompose(plan.id, plan.revision)
                 st.rerun()
             return
         if plan.status == "rejected":
-            st.info("計畫已結束，沒有新增日曆事件。")
+            st.info("This plan is closed. No calendar events were added.")
             return
         if plan.status in {"completed", "partial", "writing"}:
             if plan.status == "completed":
                 st.success(
-                    "已確認所有事件新增完成。"
+                    "All events have been added and confirmed."
                     + (
-                        " Google Calendar 沒有變更。"
+                        " Google Calendar has not changed."
                         if plan.calendar_mode == "mock"
                         else ""
                     )
                 )
             else:
-                st.warning("寫入尚未全部確認。重試時會先核對已建立的事件。")
+                st.warning(
+                    "Some writes are unconfirmed. Retry checks existing events before continuing."
+                )
             st.dataframe(
                 [
                     {k: r.get(k) for k in ("name", "status", "error")}
@@ -125,7 +127,7 @@ def main():
                 ],
                 hide_index=True,
             )
-            if plan.status != "completed" and st.button("核對並繼續新增"):
+            if plan.status != "completed" and st.button("Verify and continue"):
                 candidate = next(
                     c for c in plan.candidates if c.id == plan.selected_candidate
                 )
@@ -144,7 +146,7 @@ def main():
             return
         if plan.status == "draft" or st.session_state.get("edit_plan") == plan.id:
             st.info(
-                "確認任務名稱、估時與依賴後，再建立方案。完整的依賴編輯與週曆可使用 React 工作區。"
+                "Review task names, estimates, and prerequisites before building schedules. The web workspace offers full dependency editing and a week view."
             )
             rows = st.data_editor(
                 [task.model_dump() for task in plan.tasks],
@@ -153,11 +155,11 @@ def main():
                 key=f"tasks-{plan.id}-{plan.revision}",
             )
             deadline = st.date_input(
-                "截止日期",
+                "Deadline",
                 value=plan.preferences.deadline,
                 key=f"deadline-{plan.id}-{plan.revision}",
             )
-            if st.button("儲存並建立方案", type="primary"):
+            if st.button("Save and build schedules", type="primary"):
                 prefs = plan.preferences.model_copy(update={"deadline": deadline})
                 updated = service.update(
                     plan.id,
@@ -167,20 +169,22 @@ def main():
                         preferences=prefs,
                     ),
                 )
-                with st.spinner("正在讀取日曆並建立三種安排…"):
+                with st.spinner("Reading your calendar and building three schedules…"):
                     service.generate(plan.id, updated.revision)
                 st.session_state.pop("edit_plan", None)
                 st.rerun()
             return
         if plan.status == "needs_review":
-            st.warning("日曆有新的變化。請重新檢視並逐項確認限制。")
+            st.warning(
+                "Your calendar has changed. Please review and acknowledge each issue."
+            )
         names = {
-            "deadline_first": "提早完成",
-            "min_fragmentation": "集中安排",
-            "energy_aware": "配合精力",
+            "deadline_first": "Finish early",
+            "min_fragmentation": "Group work",
+            "energy_aware": "Match energy",
         }
         selected = st.radio(
-            "選擇方案",
+            "Choose a schedule",
             [c.id for c in plan.candidates],
             format_func=lambda key: names[key],
             horizontal=True,
@@ -197,7 +201,7 @@ def main():
         candidate = next(c for c in plan.candidates if c.id == selected)
         st.write(candidate.explanation)
         st.caption(
-            f"{candidate.metrics['scheduled_tasks']}/{candidate.metrics['total_tasks']} 項任務已排入 · {candidate.metrics['scheduled_minutes']} 分鐘"
+            f"{candidate.metrics['scheduled_tasks']}/{candidate.metrics['total_tasks']} tasks scheduled · {candidate.metrics['scheduled_minutes']} minutes"
         )
         from zoneinfo import ZoneInfo
         from datetime import datetime
@@ -206,11 +210,11 @@ def main():
         st.dataframe(
             [
                 {
-                    "任務": e["name"],
-                    "開始": datetime.fromisoformat(e["start"])
+                    "Task": e["name"],
+                    "Start": datetime.fromisoformat(e["start"])
                     .astimezone(zone)
                     .strftime("%m/%d %H:%M"),
-                    "結束": datetime.fromisoformat(e["end"])
+                    "End": datetime.fromisoformat(e["end"])
                     .astimezone(zone)
                     .strftime("%m/%d %H:%M"),
                 }
@@ -221,18 +225,18 @@ def main():
         acknowledged = []
         for issue in candidate.validation["violations"]:
             if st.checkbox(
-                f"我了解並接受：{issue['event_name']} — {issue['description']}",
+                f"I understand and accept: {issue['event_name']} — {issue['description']}",
                 key=f"ack-{plan.id}-{plan.revision}-{selected}-{issue['id']}",
             ):
                 acknowledged.append(issue["id"])
-        if not plan.approval and st.button("調整任務"):
+        if not plan.approval and st.button("Edit tasks"):
             st.session_state["edit_plan"] = plan.id
             st.rerun()
         st.caption(
-            f"將新增 {len(candidate.events)} 個事件到 {'示範日曆（不會寫入 Google Calendar）' if plan.calendar_mode == 'mock' else plan.calendar_id}。"
+            f"Add {len(candidate.events)} events to {'the demo calendar (no changes to Google Calendar)' if plan.calendar_mode == 'mock' else plan.calendar_id}."
         )
         if st.button(
-            "確認新增",
+            "Add events",
             type="primary",
             disabled=not candidate.events
             or len(acknowledged) != len(candidate.validation["violations"]),
@@ -247,12 +251,12 @@ def main():
                 ),
             )
             st.rerun()
-        if not plan.approval and st.button("不採用"):
+        if not plan.approval and st.button("Reject plan"):
             service.reject(plan.id, plan.revision)
             st.rerun()
     except Exception as exc:
         st.error(_format_planning_error(exc))
-        st.caption("已保存的內容仍保留。可從側欄重新開啟計畫。")
+        st.caption("Your saved plan is retained. Reopen it from the sidebar.")
 
 
 if __name__ == "__main__":

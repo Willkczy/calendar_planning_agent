@@ -110,6 +110,24 @@ def test_repeated_approval_is_idempotent_across_service_instances(setup):
         second_service.approve(plan.id, approval(plan, plan.candidates[1]))
 
 
+def test_saved_rule_copy_uses_english_without_changing_schedule_identity(setup):
+    service, calendar = setup
+    plan = proposal(service)
+    candidate = plan.candidates[0]
+    candidate.explanation = "先前版本的規則說明"
+    service.store.save(plan)
+
+    reopened = service.get(plan.id)
+    assert reopened.candidates[0].explanation.startswith(
+        "Use the earliest available slots"
+    )
+    assert reopened.candidates[0].snapshot_hash == candidate.snapshot_hash
+    assert reopened.candidates[0].events == candidate.events
+    assert reopened.tasks == plan.tasks
+    assert service.store.get(plan.id).candidates[0].explanation == candidate.explanation
+    assert calendar.inserts == 0
+
+
 @pytest.mark.parametrize("lost_response", [False, True])
 def test_partial_write_recovery_and_lost_response(setup, lost_response):
     service, calendar = setup

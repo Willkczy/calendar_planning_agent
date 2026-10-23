@@ -5,38 +5,46 @@ test("edit, compare, approve and reload the same saved plan", async ({
 }) => {
   await page.goto("/");
   await page
-    .getByRole("button", { name: "完成個人作品集", exact: true })
+    .getByRole("button", { name: "Build a portfolio", exact: true })
     .click();
-  await page.getByRole("button", { name: "拆解我的目標", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "先把步驟，調整成你的樣子。" }),
-  ).toBeVisible();
-  await page.getByLabel("任務 4 估計分鐘", { exact: true }).fill("60");
-  await expect(page.getByText("有未儲存的修改", { exact: true })).toBeVisible();
   await page
-    .getByRole("button", { name: "儲存並建立方案", exact: true })
+    .getByRole("button", { name: "Break down my goal", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "選一個適合你的節奏。" }),
+    page.getByRole("heading", { name: "Make the plan your own." }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Task 4 estimate (minutes)", { exact: true })
+    .fill("60");
+  await expect(
+    page.getByText("Unsaved changes", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Save and build schedules", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Find a rhythm that fits." }),
   ).toBeVisible();
   await page
     .locator(".candidate-card")
     .filter({
-      has: page.getByRole("heading", { name: "配合精力", exact: true }),
+      has: page.getByRole("heading", { name: "Match energy", exact: true }),
     })
     .click();
-  await page.getByRole("button", { name: "查看新增摘要", exact: true }).click();
-  await expect(page.getByRole("dialog")).toContainText("4 小時 30 分");
   await page
-    .getByRole("button", { name: "確認新增至示範日曆", exact: true })
+    .getByRole("button", { name: "Review events", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("4 hr 30 min");
+  await page
+    .getByRole("button", { name: "Add to demo calendar", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "已新增 6 個事件", exact: true }),
+    page.getByRole("heading", { name: "6 events added", exact: true }),
   ).toBeVisible();
   const savedUrl = page.url();
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "已新增 6 個事件", exact: true }),
+    page.getByRole("heading", { name: "6 events added", exact: true }),
   ).toBeVisible();
   expect(page.url()).toBe(savedUrl);
   expect(
@@ -54,23 +62,30 @@ test("return to editing invalidates approval, then reject without writes", async
 }) => {
   await page.goto("/");
   await page
-    .getByRole("button", { name: "學會 Python 基礎", exact: true })
+    .getByRole("button", { name: "Learn Python basics", exact: true })
     .click();
-  await page.getByRole("button", { name: "拆解我的目標", exact: true }).click();
   await page
-    .getByRole("button", { name: "儲存並建立方案", exact: true })
+    .getByRole("button", { name: "Break down my goal", exact: true })
     .click();
-  await page.getByRole("button", { name: "調整任務", exact: true }).click();
-  await page.getByLabel("任務 1 估計分鐘", { exact: true }).fill("20");
+  await page
+    .getByRole("button", { name: "Save and build schedules", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Edit tasks", exact: true }).click();
+  await page
+    .getByLabel("Task 1 estimate (minutes)", { exact: true })
+    .fill("20");
   await expect(
-    page.getByRole("button", { name: "查看新增摘要", exact: true }),
+    page.getByRole("button", { name: "Review events", exact: true }),
   ).toHaveCount(0);
   await page
-    .getByRole("button", { name: "儲存並建立方案", exact: true })
+    .getByRole("button", { name: "Save and build schedules", exact: true })
     .click();
-  await page.getByRole("button", { name: "不採用", exact: true }).click();
+  await page.getByRole("button", { name: "Reject plan", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "沒有新增任何日曆事件", exact: true }),
+    page.getByRole("heading", {
+      name: "No calendar events were added",
+      exact: true,
+    }),
   ).toBeVisible();
   const id = new URL(page.url()).searchParams.get("plan");
   const plan = await (await request.get(`/api/plans/${id}`)).json();

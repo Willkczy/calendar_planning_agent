@@ -29,6 +29,11 @@ from src.planning.store import ConflictError, PlanStore
 from src.validator.constraints import validate_schedule
 
 STRATEGIES = ("deadline_first", "min_fragmentation", "energy_aware")
+STRATEGY_EXPLANATIONS = {
+    "deadline_first": "Use the earliest available slots while respecting task prerequisites.",
+    "min_fragmentation": "Favor larger free blocks on the earliest feasible day to group work together.",
+    "energy_aware": "Compare periods on the earliest feasible day to match task intensity with your energy.",
+}
 
 
 def digest(value) -> str:
@@ -96,6 +101,10 @@ class PlanningService:
     def get(self, plan_id):
         plan = self.store.get(plan_id)
         plan.write_results = self.store.write_records(plan_id)
+        # Rule explanations are presentation copy, not part of the approved
+        # schedule identity. Saved plans should use the current interface copy.
+        for candidate in plan.candidates:
+            candidate.explanation = STRATEGY_EXPLANATIONS[candidate.id]
         return plan
 
     def save(self, plan):
@@ -215,11 +224,7 @@ class PlanningService:
         }
         if metrics["finishes_at"]:
             metrics["finishes_at"] = metrics["finishes_at"].isoformat()
-        explanation = {
-            "deadline_first": "依照任務依賴，優先使用最早能容納任務的空檔。",
-            "min_fragmentation": "在最早可行的日期優先使用較大的空檔，集中安排工作。",
-            "energy_aware": "在最早可行的日期比較不同時段，配合任務強度與精力偏好。",
-        }[strategy]
+        explanation = STRATEGY_EXPLANATIONS[strategy]
         snapshot = digest(
             {
                 "plan": plan.id,

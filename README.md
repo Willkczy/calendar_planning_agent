@@ -1,4 +1,4 @@
-# 日序 · Calendar Planning Agent
+# Calendar Planning Agent
 
 Turn a goal into an editable task draft, compare three schedules, and add only the events you approve. The main workspace uses React + TypeScript with a FastAPI backend. Streamlit remains available through the same planning service.
 

@@ -23,10 +23,10 @@ export async function api<T>(
           ? detail
               .map(
                 (e: { loc: string[]; msg: string }) =>
-                  `${e.loc.slice(1).join(" / ")}：${e.msg}`,
+                  `${e.loc.slice(1).join(" / ")}: ${e.msg}`,
               )
-              .join("；")
-          : "目前無法完成操作，請稍後再試。",
+              .join("; ")
+          : "Unable to complete this request. Please try again.",
     );
   }
   return data as T;

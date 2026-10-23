@@ -1,7 +1,6 @@
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import luxonPlugin from "@fullcalendar/luxon3";
-import zhTwLocale from "@fullcalendar/core/locales/zh-tw";
 import type { Candidate, Plan } from "./types";
 
 export default function Calendar({
@@ -15,7 +14,7 @@ export default function Calendar({
     <FullCalendar
       plugins={[timeGridPlugin, luxonPlugin]}
       initialView="timeGridWeek"
-      locale={zhTwLocale}
+      locale="en"
       timeZone={plan.preferences.timezone}
       initialDate={candidate.events[0]?.start || plan.preferences.deadline}
       headerToolbar={{ left: "prev,next", center: "title", right: "" }}
@@ -29,7 +28,7 @@ export default function Calendar({
         ...plan.busy_blocks.map((e, i) => ({
           ...e,
           id: `busy-${i}`,
-          title: "既有行程",
+          title: "Busy",
           backgroundColor: "#e0e4df",
           borderColor: "#e0e4df",
           textColor: "#58645b",

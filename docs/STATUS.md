@@ -1,10 +1,10 @@
 # Current Project Status
 
-Updated 2026-10-22 after the local workspace refactor, based on `80c1068`. The main product is now React + TypeScript → FastAPI → a shared Python planning service. The original research graph remains available, and Streamlit is a compatibility UI.
+Updated 2026-10-23: restored the original English interface after the local workspace refactor. The main product is React + TypeScript → FastAPI → a shared Python planning service. The original research graph remains available, and Streamlit is a compatibility UI.
 
 ## Implemented
 
-- Guided Traditional Chinese UI: goal intake, editable task names/descriptions/durations/complexity/dependencies, three quantitative candidate cards, agenda/week view, explicit approval dialog, saved-plan history, and per-event results. Mobile defaults to an agenda. FullCalendar React uses Luxon for IANA timezone support and is loaded separately from the main bundle.
+- Guided English UI: goal intake, editable task names/descriptions/durations/complexity/dependencies, three quantitative candidate cards, agenda/week view, explicit approval dialog, saved-plan history, and per-event results. Dates, calendar labels, system explanations, and new mock examples use English. User-authored goals and task text retain their original language. Mobile defaults to an agenda. FullCalendar React uses Luxon for IANA timezone support and is loaded separately from the main bundle.
 - Pydantic request/storage models, stable task IDs, dependency DAG checks, and a shared application service used by both UIs. Editing increases the revision and invalidates candidates. Approval binds the exact revision and schedule hash.
 - SQLite persistence for plans, revision snapshots, immutable approval identity, write ledger, and mock events. Per-plan POSIX file locks serialize mutations across local API/Streamlit processes. Saved stages survive refresh and process restart.
 - One definition of local deadline boundaries, explicit timezone handling, UTC duration/interval arithmetic, DST tests, all-day calendar timezone handling, and filtering of transparent/cancelled/self-declined events.
@@ -16,12 +16,12 @@ Updated 2026-10-22 after the local workspace refactor, based on `80c1068`. The m
 
 ## Verification
 
-Executed locally on 2026-10-22:
+Verified locally on 2026-10-22, with the English-interface checks repeated on 2026-10-23:
 
 | Check | Result |
 |---|---|
-| Full offline Python suite | **217 passed, 31 skipped** |
-| New service/API, correctness, and Streamlit cases | **30 passed** (included above) |
+| Full offline Python suite | **218 passed, 31 skipped** |
+| New service/API, correctness, and Streamlit cases | **31 passed** (included above) |
 | React TypeScript check + production build | Passed |
 | Ruff fatal/undefined/unused checks on new core and refactored algorithms | Passed |
 | Python compile check, `pip check`, `git diff --check` | Passed |
@@ -31,6 +31,7 @@ Executed locally on 2026-10-22:
 | Browser layout | Desktop week/agenda and 375px/320px mobile; no horizontal overflow observed; narrow action-button layout corrected |
 | Browser console | No errors observed in the final walkthrough |
 | Playwright test collection | Four scenarios collected (two flows × desktop/mobile) |
+| English interface | Goal/task/review/confirmation copy, demo task content, date formatting, and desktop week labels verified; saved rule-copy compatibility covered by regression test |
 
 The Playwright CLI browser scenarios were **not executed locally**; manual browser verification used the connected in-app browser. The four scenarios are configured for CI; the verification results above do not include a remote CI run. Do not count test collection as a passing E2E run.
 

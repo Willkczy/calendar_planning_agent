@@ -21,25 +21,25 @@ import type {
 const Calendar = lazy(() => import("./Calendar"));
 
 export const strategyNames = {
-  deadline_first: "提早完成",
-  min_fragmentation: "集中安排",
-  energy_aware: "配合精力",
+  deadline_first: "Finish early",
+  min_fragmentation: "Group work",
+  energy_aware: "Match energy",
 };
 export const statusNames = {
-  draft: "任務草稿",
-  review: "等待確認",
-  needs_review: "需要重新檢視",
-  writing: "寫入待核對",
-  partial: "部分完成",
-  completed: "已完成",
-  rejected: "已結束",
+  draft: "Task draft",
+  review: "Ready to review",
+  needs_review: "Needs review",
+  writing: "Awaiting verification",
+  partial: "Partially complete",
+  completed: "Completed",
+  rejected: "Closed",
 };
 export const minutes = (n: number) =>
   n >= 60
-    ? `${Math.floor(n / 60)} 小時${n % 60 ? ` ${n % 60} 分` : ""}`
-    : `${n} 分鐘`;
+    ? `${Math.floor(n / 60)} hr${n % 60 ? ` ${n % 60} min` : ""}`
+    : `${n} min`;
 export function dateLabel(value: string, tz: string, withTime = false) {
-  return new Intl.DateTimeFormat("zh-TW", {
+  return new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
     month: "short",
     day: "numeric",
@@ -48,7 +48,7 @@ export function dateLabel(value: string, tz: string, withTime = false) {
   }).format(new Date(value));
 }
 export function clock(value: string, tz: string) {
-  return new Intl.DateTimeFormat("zh-TW", {
+  return new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
     hour: "2-digit",
     minute: "2-digit",
@@ -57,17 +57,17 @@ export function clock(value: string, tz: string) {
 }
 export function violationText(v: Violation) {
   const messages: Record<string, string> = {
-    UNSCHEDULED: "可用時間不足，這項任務尚未排入",
-    DEPENDENCY: "前置任務尚未完成或順序有衝突",
-    OVERLAP: "與日曆中的既有行程重疊",
-    SELF_OVERLAP: "與另一項提案任務重疊",
-    OUT_OF_HOURS: "超出偏好的工作時段",
-    NON_WORKDAY: "安排在非工作日",
-    DEADLINE_EXCEEDED: "超過截止時間",
-    SESSION_TOO_LONG: "超過單次專注時間上限",
-    BREAK_TOO_SHORT: "兩次工作之間的休息不足",
-    IN_PAST: "開始時間已經過去，建議返回調整",
-    DURATION_MISMATCH: "排定時間與任務估時不一致",
+    UNSCHEDULED: "This task could not fit in the available time",
+    DEPENDENCY: "A prerequisite is missing or scheduled too late",
+    OVERLAP: "Overlaps an existing calendar event",
+    SELF_OVERLAP: "Overlaps another proposed task",
+    OUT_OF_HOURS: "Outside your preferred working hours",
+    NON_WORKDAY: "Falls on a non-working day",
+    DEADLINE_EXCEEDED: "Ends after the deadline",
+    SESSION_TOO_LONG: "Exceeds your maximum session length",
+    BREAK_TOO_SHORT: "Not enough break time between sessions",
+    IN_PAST: "The start time has passed; consider editing the plan",
+    DURATION_MISMATCH: "Scheduled duration differs from the task estimate",
   };
   return messages[v.violation_type] || v.description;
 }
@@ -85,7 +85,7 @@ export function PreferencesFields({
     <div className="preferences">
       <div className="field-grid">
         <label>
-          截止日期
+          Deadline
           <input
             type="date"
             required
@@ -94,7 +94,7 @@ export function PreferencesFields({
           />
         </label>
         <label>
-          時區
+          Time zone
           <input
             required
             value={value.timezone}
@@ -112,14 +112,15 @@ export function PreferencesFields({
       </div>
       <details className="preferences-details">
         <summary>
-          工作時段與精力偏好{" "}
+          Work hours and energy{" "}
           <span>
-            {value.work_start}–{value.work_end} · 休息 {value.break_minutes} 分
+            {value.work_start}–{value.work_end} · {value.break_minutes} min
+            breaks
           </span>
         </summary>
         <div className="field-grid">
           <label>
-            開始時間
+            Start time
             <input
               required
               type="time"
@@ -128,7 +129,7 @@ export function PreferencesFields({
             />
           </label>
           <label>
-            結束時間
+            End time
             <input
               required
               type="time"
@@ -137,7 +138,7 @@ export function PreferencesFields({
             />
           </label>
           <label>
-            單次上限（分鐘）
+            Max session (minutes)
             <input
               required
               type="number"
@@ -148,7 +149,7 @@ export function PreferencesFields({
             />
           </label>
           <label>
-            休息間隔（分鐘）
+            Breaks (minutes)
             <input
               required
               type="number"
@@ -160,8 +161,8 @@ export function PreferencesFields({
           </label>
         </div>
         <fieldset className="days">
-          <legend>可安排的日子</legend>
-          {["一", "二", "三", "四", "五", "六", "日"].map((day, i) => (
+          <legend>Working days</legend>
+          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, i) => (
             <label key={i}>
               <input
                 type="checkbox"
@@ -175,14 +176,14 @@ export function PreferencesFields({
                   )
                 }
               />
-              <span>週{day}</span>
+              <span>{day}</span>
             </label>
           ))}
         </fieldset>
         <div className="field-grid energy-fields">
           {(["morning", "afternoon", "evening"] as const).map((period, i) => (
             <label key={period}>
-              {["上午精力", "下午精力", "晚間精力"][i]}
+              {["Morning energy", "Afternoon energy", "Evening energy"][i]}
               <select
                 value={value.energy_levels[period]}
                 onChange={(e) =>
@@ -192,9 +193,9 @@ export function PreferencesFields({
                   })
                 }
               >
-                <option value="high">高</option>
-                <option value="medium">中</option>
-                <option value="low">低</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
               </select>
             </label>
           ))}
@@ -224,7 +225,7 @@ export function TaskEditor({
           <span className="task-number">{String(i + 1).padStart(2, "0")}</span>
           <div className="task-fields">
             <label className="sr-only" htmlFor={`name-${task.id}`}>
-              任務 {i + 1} 名稱
+              Task {i + 1} name
             </label>
             <input
               className="task-name"
@@ -235,7 +236,7 @@ export function TaskEditor({
               onChange={(e) => update(i, { name: e.target.value })}
             />
             <label className="sr-only" htmlFor={`description-${task.id}`}>
-              任務 {i + 1} 說明
+              Task {i + 1} description
             </label>
             <textarea
               id={`description-${task.id}`}
@@ -245,11 +246,11 @@ export function TaskEditor({
             />
             <details className="dependencies">
               <summary>
-                前置任務{" "}
+                Prerequisites{" "}
                 <span>
                   {task.depends_on.length
-                    ? `${task.depends_on.length} 項`
-                    : "無"}
+                    ? `${task.depends_on.length}`
+                    : "None"}
                 </span>
               </summary>
               <div>
@@ -276,9 +277,9 @@ export function TaskEditor({
           </div>
           <div className="task-settings">
             <label>
-              估計分鐘
+              Minutes
               <input
-                aria-label={`任務 ${i + 1} 估計分鐘`}
+                aria-label={`Task ${i + 1} estimate (minutes)`}
                 required
                 type="number"
                 min="1"
@@ -290,22 +291,22 @@ export function TaskEditor({
               />
             </label>
             <label>
-              專注強度
+              Focus level
               <select
                 value={task.complexity}
                 onChange={(e) =>
                   update(i, { complexity: e.target.value as Level })
                 }
               >
-                <option value="low">低</option>
-                <option value="medium">中</option>
-                <option value="high">高</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
               </select>
             </label>
             <button
               type="button"
               className="icon-button"
-              aria-label={`移除任務 ${i + 1}`}
+              aria-label={`Remove task ${i + 1}`}
               onClick={() =>
                 change(
                   tasks
@@ -320,7 +321,7 @@ export function TaskEditor({
               <Trash2 size={15} />
             </button>
             {task.duration_minutes > maxSession && (
-              <small className="warning-text">超過單次上限</small>
+              <small className="warning-text">Over session limit</small>
             )}
           </div>
         </article>
@@ -333,7 +334,7 @@ export function TaskEditor({
             ...tasks,
             {
               id: crypto.randomUUID(),
-              name: "新的任務",
+              name: "New task",
               description: "",
               duration_minutes: 30,
               complexity: "medium",
@@ -343,7 +344,7 @@ export function TaskEditor({
         }
       >
         <Plus size={16} />
-        新增任務
+        Add task
       </button>
     </div>
   );
@@ -389,7 +390,7 @@ export function Agenda({
                 <strong>{event.name}</strong>
                 <p>{event.description}</p>
                 <span className="event-tag">
-                  草稿 ·{" "}
+                  Draft ·{" "}
                   {minutes(
                     (Date.parse(event.end) - Date.parse(event.start)) / 60000,
                   )}
@@ -402,8 +403,11 @@ export function Agenda({
       {!candidate.events.length && (
         <div className="empty-state">
           <CalendarDays />
-          <h3>目前沒有可排入的時段</h3>
-          <p>調整截止日期、工作時間或任務估時，再建立方案。</p>
+          <h3>No tasks fit yet</h3>
+          <p>
+            Adjust your deadline, work hours, or task estimates, then build
+            schedules again.
+          </p>
         </div>
       )}
     </div>
@@ -423,22 +427,22 @@ export function SchedulePreview({
       <div className="panel-header">
         <div>
           <span className="eyebrow">YOUR SCHEDULE</span>
-          <h2>看看時間怎麼安排</h2>
+          <h2>Your time, mapped out</h2>
         </div>
-        <div className="segmented desktop-only" aria-label="檢視方式">
+        <div className="segmented desktop-only" aria-label="Schedule view">
           <button
             aria-pressed={view === "agenda"}
             onClick={() => setView("agenda")}
           >
             <List size={16} />
-            議程
+            Agenda
           </button>
           <button
             aria-pressed={view === "week"}
             onClick={() => setView("week")}
           >
             <CalendarDays size={16} />
-            週曆
+            Week
           </button>
         </div>
       </div>
@@ -449,8 +453,8 @@ export function SchedulePreview({
         </span>
         <span>
           <i className="legend-dot" />
-          草稿 <i className="legend-dot busy-dot" />
-          既有行程
+          Draft <i className="legend-dot busy-dot" />
+          Busy
         </span>
       </div>
       <div className={view === "week" ? "mobile-only" : ""}>
@@ -459,7 +463,7 @@ export function SchedulePreview({
       {view === "week" && (
         <div className="calendar-shell desktop-only">
           <Suspense
-            fallback={<p className="calendar-loading">正在載入週曆…</p>}
+            fallback={<p className="calendar-loading">Loading week view…</p>}
           >
             <Calendar
               key={`${plan.id}-${plan.revision}-${candidate.id}`}
@@ -503,7 +507,7 @@ export function Confirmation({
           className="button primary"
           disabled={busy || !candidate.events.length}
         >
-          查看新增摘要 <ArrowRight size={17} />
+          Review events <ArrowRight size={17} />
         </button>
       </Dialog.Trigger>
       <Dialog.Portal>
@@ -520,35 +524,38 @@ export function Confirmation({
           <Dialog.Close asChild>
             <button
               className="icon-button dialog-close"
-              aria-label="關閉摘要"
+              aria-label="Close summary"
               disabled={busy}
             >
               <X size={20} />
             </button>
           </Dialog.Close>
           <span className="eyebrow">ONE LAST LOOK</span>
-          <Dialog.Title>確認這份安排</Dialog.Title>
+          <Dialog.Title>Confirm your schedule</Dialog.Title>
           <Dialog.Description>
-            將新增 {candidate.events.length} 個事件到{" "}
-            {plan.calendar_mode === "mock" ? "示範日曆" : plan.calendar_id}。
+            Add {candidate.events.length} events to{" "}
             {plan.calendar_mode === "mock"
-              ? "這次操作不會變更 Google Calendar。"
-              : "確認後會新增到你的 Google Calendar。"}
+              ? "the demo calendar"
+              : plan.calendar_id}
+            .{" "}
+            {plan.calendar_mode === "mock"
+              ? "Google Calendar will not be changed."
+              : "Confirming will add these events to your Google Calendar."}
           </Dialog.Description>
           <div className="confirmation-stats">
             <span>
-              方案<strong>{strategyNames[candidate.id]}</strong>
+              Schedule<strong>{strategyNames[candidate.id]}</strong>
             </span>
             <span>
-              專注時間
+              Focus time
               <strong>{minutes(candidate.metrics.scheduled_minutes)}</strong>
             </span>
             <span>
-              版本<strong>v{plan.revision}</strong>
+              Version<strong>v{plan.revision}</strong>
             </span>
           </div>
           <p className="muted small">
-            所有時間皆為 {plan.preferences.timezone}。
+            All times are in {plan.preferences.timezone}.
           </p>
           <div className="confirmation-events">
             {candidate.events.map((e) => (
@@ -563,7 +570,7 @@ export function Confirmation({
           </div>
           {!!issues.length && (
             <div className="issue-list">
-              <strong>請逐項確認尚待處理的限制</strong>
+              <strong>Please acknowledge each issue</strong>
               {issues.map((issue) => (
                 <label key={issue.id}>
                   <input
@@ -578,8 +585,8 @@ export function Confirmation({
                     }
                   />
                   <span>
-                    {issue.event_name}：{violationText(issue)}
-                    。我了解並仍要新增已排入的事件。
+                    {issue.event_name}: {violationText(issue)}. I understand and
+                    still want to add the scheduled events.
                   </span>
                 </label>
               ))}
@@ -595,13 +602,14 @@ export function Confirmation({
           >
             <Check size={17} />
             {busy
-              ? "正在核對日曆與新增…"
+              ? "Checking calendar and adding events…"
               : plan.calendar_mode === "mock"
-                ? "確認新增至示範日曆"
-                : "確認新增至 Google Calendar"}
+                ? "Add to demo calendar"
+                : "Add to Google Calendar"}
           </button>
           <p className="small muted">
-            新增前會重新檢查日曆。新的衝突會回到方案頁，讓你重新檢視。
+            We check your calendar again before adding events. New conflicts
+            return you to review.
           </p>
         </Dialog.Content>
       </Dialog.Portal>

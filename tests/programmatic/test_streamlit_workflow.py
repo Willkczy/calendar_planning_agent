@@ -20,10 +20,12 @@ def test_streamlit_persists_approved_or_rejected_plan(tmp_path, monkeypatch, app
         app.text_input[0].set_value("Build a personal portfolio")
         next(b for b in app.button if b.label == "Plan my schedule").click().run()
         assert not app.exception and not app.error
-        next(b for b in app.button if b.label == "儲存並建立方案").click().run()
+        next(
+            b for b in app.button if b.label == "Save and build schedules"
+        ).click().run()
         assert not app.exception and not app.error
         assert len(app.radio[0].options) == 3
-        action = "確認新增" if approve else "不採用"
+        action = "Add events" if approve else "Reject plan"
         next(b for b in app.button if b.label == action).click().run()
         assert not app.exception and not app.error
 
@@ -38,8 +40,10 @@ def test_streamlit_persists_approved_or_rejected_plan(tmp_path, monkeypatch, app
         reopened.run()
         assert not reopened.exception and not reopened.error
         if approve:
-            assert "已確認所有事件新增完成" in reopened.success[0].value
+            assert (
+                "All events have been added and confirmed" in reopened.success[0].value
+            )
         else:
-            assert "沒有新增日曆事件" in reopened.info[0].value
+            assert "No calendar events were added" in reopened.info[0].value
     finally:
         st.cache_resource.clear()
